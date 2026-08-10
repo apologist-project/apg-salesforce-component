@@ -306,13 +306,5 @@ sf apex run test --tests ApologistAgentServiceTest --result-format human -o apg-
 | Icon missing | `cardIcon` not valid `category:name` SLDS icon |
 | Old title/icon after deploy | Page still has previous App Builder property values — edit the component properties or re-add the component |
 
----
-
-## Related repos
-
-| Repo | Role |
-|------|------|
-| [apg-agent](https://github.com/apologist-project/apg-agent) | Agent runtime + OpenAPI (`/api/v1`) |
-| [apg-workspace](https://github.com/apologist-project/apg-workspace) | Multi-repo workspace (`salesforce-component/` link) |
 
 See [`AGENTS.md`](AGENTS.md) for agent-oriented conventions.
