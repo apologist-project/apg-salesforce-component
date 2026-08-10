@@ -30,8 +30,22 @@
                 name="cardIcon"
                 type="String"
                 label="Icon name"
-                description="SLDS icon in category:name format (e.g. standard:robot, utility:chat). See https://www.lightningdesignsystem.com/icons/"
-                default="standard:robot"
+                description="SLDS icon in category:name format (e.g. standard:sparkles, utility:chat). See https://www.lightningdesignsystem.com/icons/"
+                default="standard:sparkles"
+            />
+            <property
+                name="iconBackgroundColor"
+                type="String"
+                label="Icon background color"
+                description="CSS color for the card header icon background (e.g. #7137ff)."
+                default="#7137ff"
+            />
+            <property
+                name="buttonColor"
+                type="String"
+                label="Button color"
+                description="CSS color for the Generate Draft Reply button (e.g. #7137ff)."
+                default="#7137ff"
             />
             <property
                 name="messageLimit"

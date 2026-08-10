@@ -216,7 +216,9 @@ Set these in Lightning App Builder by selecting **Apologist Generate Reply** on 
 |-------------------|--------------|------|---------|-------------|
 | **Title** | `cardTitle` | String | `Apologist Agent` | Card header title shown to agents. |
 | **Description** | `cardDescription` | String | `Generate a draft reply from the Apologist Agent API.` | Short help text under the title. |
-| **Icon name** | `cardIcon` | String | `standard:robot` | SLDS icon for the card header. |
+| **Icon name** | `cardIcon` | String | `standard:sparkles` | SLDS icon for the card header. |
+| **Icon background color** | `iconBackgroundColor` | String | `#7137ff` | Background color for the card header icon. |
+| **Button color** | `buttonColor` | String | `#7137ff` | Background/border color for **Generate Draft Reply**. |
 | **Past messages to include** | `messageLimit` | Integer | *(blank)* | How much transcript to send to the Agent API. |
 
 Button label (**Generate Draft Reply**) and the draft field label (**Generated Draft Reply**) are fixed in the component.
@@ -231,12 +233,24 @@ Existing Lightning pages keep whatever Title/Description were saved in App Build
 
 Use Salesforce Lightning Design System icons in **`category:name`** form:
 
-- Examples: `standard:robot`, `standard:bot`, `utility:chat`, `utility:einstein`
+- Examples: `standard:sparkles`, `standard:robot`, `utility:chat`, `utility:einstein`
 - Catalog: [Lightning Design System — Icons](https://www.lightningdesignsystem.com/icons/)
 
 Invalid names may show a blank or broken icon; fix the string in App Builder and save the page.
 
 Heroicons / custom SVGs are not supported via this property. For a custom mark, upload a Static Resource and extend the LWC header (not included out of the box).
+
+### Icon background color
+
+CSS color for the header icon tile (hex recommended, e.g. `#7137ff`). Default is `#7137ff`. If you change **Icon name**, you may want a matching background for that icon.
+
+Applied via SLDS icon styling hooks (`--slds-c-icon-color-background`).
+
+### Button color
+
+CSS color for the **Generate Draft Reply** brand button (hex recommended, e.g. `#7137ff`). Default is `#7137ff`; blank falls back to that same default.
+
+Applied via SLDS button brand styling hooks (`--slds-c-button-brand-color-background` / border, including hover).
 
 ### Past messages to include
 

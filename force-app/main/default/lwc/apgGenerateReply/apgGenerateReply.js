@@ -5,7 +5,9 @@ import generateDraftDetailed from '@salesforce/apex/ApologistAgentService.genera
 
 const DEFAULT_TITLE = 'Apologist Agent';
 const DEFAULT_DESCRIPTION = 'Generate a draft reply from the Apologist Agent API.';
-const DEFAULT_ICON = 'standard:robot';
+const DEFAULT_ICON = 'standard:sparkles';
+const DEFAULT_BUTTON_COLOR = '#7137ff';
+const DEFAULT_ICON_BACKGROUND_COLOR = '#7137ff';
 
 export default class ApgGenerateReply extends LightningElement {
   /** Messaging Session Id (set by the record page). */
@@ -30,6 +32,12 @@ export default class ApgGenerateReply extends LightningElement {
    */
   @api cardIcon;
 
+  /** Hex (or CSS) color for the Generate Draft Reply brand button. */
+  @api buttonColor;
+
+  /** Hex (or CSS) color for the card header icon background. */
+  @api iconBackgroundColor;
+
   isBusy = false;
   draftText = '';
   errorMessage = '';
@@ -44,6 +52,39 @@ export default class ApgGenerateReply extends LightningElement {
 
   get resolvedCardIcon() {
     return this.cardIcon || DEFAULT_ICON;
+  }
+
+  get resolvedButtonColor() {
+    return this.buttonColor || DEFAULT_BUTTON_COLOR;
+  }
+
+  get resolvedIconBackgroundColor() {
+    return this.iconBackgroundColor || DEFAULT_ICON_BACKGROUND_COLOR;
+  }
+
+  /**
+   * SLDS styling hooks for lightning-button variant="brand".
+   * Custom properties inherit into the base component shadow tree.
+   */
+  get buttonColorStyle() {
+    const color = this.resolvedButtonColor;
+    return [
+      `--slds-c-button-brand-color-background: ${color}`,
+      `--slds-c-button-brand-color-border: ${color}`,
+      `--slds-c-button-brand-color-background-hover: ${color}`,
+      `--slds-c-button-brand-color-border-hover: ${color}`,
+      `--sds-c-button-brand-color-background: ${color}`,
+      `--sds-c-button-brand-color-border: ${color}`
+    ].join('; ');
+  }
+
+  /** SLDS styling hooks for the card header lightning-icon background. */
+  get iconBackgroundStyle() {
+    const color = this.resolvedIconBackgroundColor;
+    return [
+      `--slds-c-icon-color-background: ${color}`,
+      `--sds-c-icon-color-background: ${color}`
+    ].join('; ');
   }
 
   get buttonLabel() {
