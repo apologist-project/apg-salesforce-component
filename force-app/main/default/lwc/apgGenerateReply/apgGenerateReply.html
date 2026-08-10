@@ -1,0 +1,34 @@
+<template>
+  <lightning-card title={resolvedCardTitle} icon-name={resolvedCardIcon}>
+    <div class="slds-p-horizontal_medium slds-p-bottom_medium">
+      <p class="slds-text-body_small slds-m-bottom_small">{resolvedCardDescription}</p>
+      <lightning-button
+        variant="brand"
+        label={buttonLabel}
+        title={buttonLabel}
+        disabled={isBusy}
+        onclick={handleGenerate}
+      ></lightning-button>
+
+      <template lwc:if={errorMessage}>
+        <div
+          class="slds-text-color_error slds-m-top_small slds-text-body_small"
+          role="alert"
+        >
+          {errorMessage}
+        </div>
+      </template>
+
+      <template lwc:if={draftText}>
+        <div class="slds-m-top_small">
+          <lightning-textarea
+            label="Generated Draft Reply"
+            value={draftText}
+            readonly
+            data-id="draft"
+          ></lightning-textarea>
+        </div>
+      </template>
+    </div>
+  </lightning-card>
+</template>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>62.0</apiVersion>
+    <isExposed>true</isExposed>
+    <masterLabel>Apologist Generate Reply</masterLabel>
+    <description>Generates a draft Service Cloud reply via the Apologist Agent API and places it in the conversation composer for human review.</description>
+    <targets>
+        <target>lightning__RecordPage</target>
+    </targets>
+    <targetConfigs>
+        <targetConfig targets="lightning__RecordPage">
+            <objects>
+                <object>MessagingSession</object>
+            </objects>
+            <property
+                name="cardTitle"
+                type="String"
+                label="Title"
+                description="Card title shown in the component header."
+                default="Apologist Agent"
+            />
+            <property
+                name="cardDescription"
+                type="String"
+                label="Description"
+                description="Short description under the title."
+                default="Generate a draft reply from the Apologist Agent API."
+            />
+            <property
+                name="cardIcon"
+                type="String"
+                label="Icon name"
+                description="SLDS icon in category:name format (e.g. standard:robot, utility:chat). See https://www.lightningdesignsystem.com/icons/"
+                default="standard:robot"
+            />
+            <property
+                name="messageLimit"
+                type="Integer"
+                label="Past messages to include"
+                description="Number of most recent messages to send to the Agent API. Leave blank to include the entire conversation."
+            />
+        </targetConfig>
+    </targetConfigs>
+</LightningComponentBundle>

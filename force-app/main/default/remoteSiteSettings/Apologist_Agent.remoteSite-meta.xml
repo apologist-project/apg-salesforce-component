@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RemoteSiteSetting xmlns="http://soap.sforce.com/2006/04/metadata">
+    <disableProtocolSecurity>false</disableProtocolSecurity>
+    <isActive>true</isActive>
+    <url>https://YOUR-AGENT-DOMAIN.example</url>
+    <description>Fallback remote site for Apologist Agent API callouts. Prefer the Apologist_Agent Named Credential (Named Credentials do not require a matching remote site).</description>
+</RemoteSiteSetting>

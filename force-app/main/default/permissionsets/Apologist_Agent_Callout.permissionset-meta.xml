@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
+    <description>Allows callouts through the Apologist_Agent External Credential principal.</description>
+    <hasActivationRequired>false</hasActivationRequired>
+    <label>Apologist Agent Callout</label>
+    <externalCredentialPrincipalAccesses>
+        <enabled>true</enabled>
+        <externalCredentialPrincipal>Apologist_Agent-ApologistAgentPrincipal</externalCredentialPrincipal>
+    </externalCredentialPrincipalAccesses>
+    <servicePresenceStatusAccesses>
+        <enabled>true</enabled>
+        <servicePresenceStatus>Available_Messaging</servicePresenceStatus>
+    </servicePresenceStatusAccesses>
+</PermissionSet>
