@@ -1,8 +1,13 @@
 /**
  * Builds Agent API prompt context from Messaging Session conversation entries.
+ * Enhanced Messaging stores message bodies off-core — SOQL ConversationEntry.Message
+ * is blank — so transcripts are loaded via Connect REST conversation entries.
  * messageLimit null / non-positive => entire conversation; positive N => N most recent.
  */
 public with sharing class ApologistConversationContext {
+  private static final String CONNECT_API_VERSION = 'v62.0';
+  private static final Integer CONNECT_RECORD_LIMIT = 1000;
+
   public class Message {
     @AuraEnabled
     public String actorType;
@@ -103,12 +108,12 @@ public with sharing class ApologistConversationContext {
   }
 
   /**
-   * Loads Messaging Session identifiers and ConversationEntry transcript.
-   * TODO: Adjust EntryType / field filters for your Messaging channel configuration.
+   * Loads Messaging Session identifiers and conversation transcript.
+   * Prefers Connect REST (Enhanced Messaging); falls back to SOQL for legacy channels.
    */
   public static DraftContext loadContext(Id messagingSessionId, Integer messageLimit) {
     if (messagingSessionId == null) {
-      throw new AuraHandledException('Messaging Session Id is required.');
+      throw auraError('Messaging Session Id is required.');
     }
 
     MessagingSession session = [
@@ -137,13 +142,164 @@ public with sharing class ApologistConversationContext {
     }
 
     if (session.ConversationId == null) {
-      return context;
+      throw auraError(
+        'This Messaging Session has no Conversation Id, so no transcript is available.'
+      );
     }
 
-    Id conversationId = session.ConversationId;
+    List<Message> chronological = new List<Message>();
 
+    // Enhanced Messaging: message bodies are off-core; Connect returns messageText.
+    if (String.isNotBlank(session.Conversation.ConversationIdentifier)) {
+      chronological = loadMessagesFromConnect(
+        session.Conversation.ConversationIdentifier
+      );
+    }
+
+    // Legacy / standard channels may still populate ConversationEntry.Message.
+    if (chronological.isEmpty()) {
+      chronological = loadMessagesFromSoql(session.ConversationId);
+    }
+
+    context.messages = applyMessageLimit(chronological, messageLimit);
+
+    if (context.messages.isEmpty()) {
+      throw auraError(
+        'No conversation messages were found for this session. Enhanced Messaging transcripts require Connect API access; confirm the session has customer/agent messages and try again.'
+      );
+    }
+
+    return context;
+  }
+
+  /**
+   * GET /services/data/vXX.X/connect/conversation/{conversationIdentifier}/entries
+   */
+  @TestVisible
+  static List<Message> loadMessagesFromConnect(String conversationIdentifier) {
+    if (String.isBlank(conversationIdentifier)) {
+      return new List<Message>();
+    }
+
+    String endpoint =
+      Url.getOrgDomainUrl().toExternalForm() +
+      '/services/data/' +
+      CONNECT_API_VERSION +
+      '/connect/conversation/' +
+      conversationIdentifier +
+      '/entries?queryDirection=FromStart&recordLimit=' +
+      String.valueOf(CONNECT_RECORD_LIMIT);
+
+    HttpRequest req = new HttpRequest();
+    req.setEndpoint(endpoint);
+    req.setMethod('GET');
+    // Lightning UserInfo.getSessionId() is not API-enabled (INVALID_SESSION_ID).
+    // Use a Visualforce {!$Api.Session_ID} bridge for a REST-capable token.
+    req.setHeader('Authorization', 'Bearer ' + apiSessionId());
+    req.setHeader('Content-Type', 'application/json');
+    req.setTimeout(120000);
+
+    HttpResponse res;
+    try {
+      res = new Http().send(req);
+    } catch (Exception e) {
+      throw auraError(
+        'Could not load conversation transcript via Connect API: ' + e.getMessage()
+      );
+    }
+
+    if (res.getStatusCode() < 200 || res.getStatusCode() >= 300) {
+      throw auraError(
+        'Connect conversation entries error ' +
+          res.getStatusCode() +
+          ': ' +
+          truncate(res.getBody(), 400)
+      );
+    }
+
+    return parseConnectEntries(res.getBody());
+  }
+
+  /**
+   * Parses Connect /conversation/.../entries JSON into chronological Message rows.
+   */
+  @TestVisible
+  static List<Message> parseConnectEntries(String responseBody) {
+    List<Message> messages = new List<Message>();
+    if (String.isBlank(responseBody)) {
+      return messages;
+    }
+
+    Object parsed = JSON.deserializeUntyped(responseBody);
+    if (!(parsed instanceof Map<String, Object>)) {
+      return messages;
+    }
+
+    Object entriesObj = ((Map<String, Object>) parsed).get('conversationEntries');
+    if (!(entriesObj instanceof List<Object>)) {
+      return messages;
+    }
+
+    for (Object entryObj : (List<Object>) entriesObj) {
+      if (!(entryObj instanceof Map<String, Object>)) {
+        continue;
+      }
+      Map<String, Object> entry = (Map<String, Object>) entryObj;
+      String body = extractConnectMessageText(entry);
+      if (String.isBlank(body)) {
+        continue;
+      }
+
+      String actorType = 'Unknown';
+      Object senderObj = entry.get('sender');
+      if (senderObj instanceof Map<String, Object>) {
+        Object role = ((Map<String, Object>) senderObj).get('role');
+        if (role != null && String.isNotBlank(String.valueOf(role))) {
+          actorType = String.valueOf(role);
+        }
+      }
+
+      Datetime sentAt = timestampToDatetime(
+        entry.get('serverReceivedTimestamp') != null
+          ? entry.get('serverReceivedTimestamp')
+          : entry.get('clientTimestamp')
+      );
+
+      messages.add(new Message(actorType, unescapeHtml(body.trim()), sentAt));
+    }
+
+    return messages;
+  }
+
+  @TestVisible
+  static String extractConnectMessageText(Map<String, Object> entry) {
+    if (entry == null) {
+      return null;
+    }
+    Object messageText = entry.get('messageText');
+    if (messageText != null && String.isNotBlank(String.valueOf(messageText))) {
+      return String.valueOf(messageText);
+    }
+    // Conversation Data-style nested payload (if Connect shape gains it).
+    Object entryPayload = entry.get('entryPayload');
+    if (entryPayload instanceof Map<String, Object>) {
+      Object abstractMessage = ((Map<String, Object>) entryPayload).get('abstractMessage');
+      if (abstractMessage instanceof Map<String, Object>) {
+        Object staticContent = ((Map<String, Object>) abstractMessage).get('staticContent');
+        if (staticContent instanceof Map<String, Object>) {
+          Object text = ((Map<String, Object>) staticContent).get('text');
+          if (text != null && String.isNotBlank(String.valueOf(text))) {
+            return String.valueOf(text);
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  static List<Message> loadMessagesFromSoql(Id conversationId) {
+    List<Message> newestFirst = new List<Message>();
     // ConversationEntry.Message is not filterable in SOQL — filter blanks in Apex.
-    // Newest-first so a positive messageLimit can stop after N non-blank messages.
     List<ConversationEntry> entries = [
       SELECT ActorType, Message, EntryTime
       FROM ConversationEntry
@@ -151,23 +307,81 @@ public with sharing class ApologistConversationContext {
       ORDER BY EntryTime DESC
     ];
 
-    List<Message> newestFirst = new List<Message>();
     for (ConversationEntry entry : entries) {
       if (String.isBlank(entry.Message)) {
         continue;
       }
-      newestFirst.add(
-        new Message(entry.ActorType, entry.Message, entry.EntryTime)
-      );
-      if (messageLimit != null && messageLimit > 0 && newestFirst.size() >= messageLimit) {
-        break;
-      }
+      newestFirst.add(new Message(entry.ActorType, entry.Message, entry.EntryTime));
     }
 
+    List<Message> chronological = new List<Message>();
     for (Integer i = newestFirst.size() - 1; i >= 0; i--) {
-      context.messages.add(newestFirst[i]);
+      chronological.add(newestFirst[i]);
     }
-    return context;
+    return chronological;
+  }
+
+  @TestVisible
+  static Datetime timestampToDatetime(Object raw) {
+    if (raw == null) {
+      return null;
+    }
+    Long millis;
+    if (raw instanceof Long) {
+      millis = (Long) raw;
+    } else if (raw instanceof Integer) {
+      millis = Long.valueOf(String.valueOf(raw));
+    } else if (raw instanceof Decimal) {
+      millis = ((Decimal) raw).longValue();
+    } else {
+      try {
+        millis = Long.valueOf(String.valueOf(raw));
+      } catch (Exception e) {
+        return null;
+      }
+    }
+    return Datetime.newInstance(millis);
+  }
+
+  @TestVisible
+  static String unescapeHtml(String value) {
+    if (String.isBlank(value)) {
+      return value;
+    }
+    return value
+      .replace('&amp;', '&')
+      .replace('&#39;', '\'')
+      .replace('&apos;', '\'')
+      .replace('&quot;', '"')
+      .replace('&lt;', '<')
+      .replace('&gt;', '>');
+  }
+
+  /**
+   * API-capable session id for same-org REST callouts from Lightning.
+   * Lightning UserInfo sessions return INVALID_SESSION_ID for Connect REST.
+   */
+  @TestVisible
+  static String apiSessionId() {
+    if (Test.isRunningTest()) {
+      return UserInfo.getSessionId();
+    }
+    String content = Page.ApologistApiSession.getContent().toString();
+    Integer startIdx = content.indexOf('SESSION_ID_START');
+    Integer endIdx = content.indexOf('SESSION_ID_END');
+    if (startIdx < 0 || endIdx < 0 || endIdx <= startIdx) {
+      throw auraError(
+        'Could not obtain an API session for conversation transcript access.'
+      );
+    }
+    startIdx += 'SESSION_ID_START'.length();
+    String sessionId = content.substring(startIdx, endIdx).trim();
+    if (String.isBlank(sessionId)) {
+      throw auraError(
+        'Could not obtain an API session for conversation transcript access.'
+      );
+    }
+    return sessionId;
   }
 
   /**
@@ -175,5 +389,18 @@ public with sharing class ApologistConversationContext {
    */
   public static List<Message> loadMessages(Id messagingSessionId, Integer messageLimit) {
     return loadContext(messagingSessionId, messageLimit).messages;
+  }
+
+  private static AuraHandledException auraError(String message) {
+    AuraHandledException e = new AuraHandledException(message);
+    e.setMessage(message);
+    return e;
+  }
+
+  private static String truncate(String value, Integer maxLen) {
+    if (value == null) {
+      return '';
+    }
+    return value.length() <= maxLen ? value : value.substring(0, maxLen);
   }
 }

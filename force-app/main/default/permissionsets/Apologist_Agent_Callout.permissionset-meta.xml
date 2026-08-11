@@ -7,6 +7,18 @@
         <enabled>true</enabled>
         <externalCredentialPrincipal>Apologist_Agent-ApologistAgentPrincipal</externalCredentialPrincipal>
     </externalCredentialPrincipalAccesses>
+    <pageAccesses>
+        <apexPage>ApologistApiSession</apexPage>
+        <enabled>true</enabled>
+    </pageAccesses>
+    <classAccesses>
+        <apexClass>ApologistAgentService</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
+    <classAccesses>
+        <apexClass>ApologistConversationContext</apexClass>
+        <enabled>true</enabled>
+    </classAccesses>
     <servicePresenceStatusAccesses>
         <enabled>true</enabled>
         <servicePresenceStatus>Available_Messaging</servicePresenceStatus>

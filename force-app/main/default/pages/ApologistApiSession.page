@@ -1,0 +1,8 @@
+<apex:page
+  contentType="text/plain"
+  showHeader="false"
+  sidebar="false"
+  standardStylesheets="false"
+  applyHtmlTag="false"
+  applyBodyTag="false"
+>SESSION_ID_START{!$Api.Session_ID}SESSION_ID_END</apex:page>

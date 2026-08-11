@@ -6,14 +6,17 @@ Salesforce DX project: Lightning Web Component + Apex that drafts Enhanced Messa
 
 - Salesforce DX (`sfdx-project.json`, `force-app/`)
 - LWC: `apgGenerateReply` on **MessagingSession** record pages
-- Apex: `ApologistAgentService` (callout), `ApologistConversationContext` (transcript + limit)
+- Apex: `ApologistAgentService` (Agent API callout), `ApologistConversationContext` (transcript + limit)
 - Auth: Named Credential `Apologist_Agent` + External Credential (header `x-api-key`)
+- Transcript: Connect REST `GET /services/data/vXX.X/connect/conversation/{ConversationIdentifier}/entries` (Enhanced Messaging bodies are off-core; SOQL `ConversationEntry.Message` is blank)
+- Same-org Connect auth: Visualforce `ApologistApiSession` (`{!$Api.Session_ID}`) — Lightning `UserInfo.getSessionId()` is not API-enabled
 
 ## Do / don’t
 
 | Do | Don’t |
 |----|--------|
 | `POST /api/v1/chat/completions` with `stream: false` | Embed `/beacon/agent*.js` for this draft flow |
+| Load Enhanced Messaging text via Connect conversation entries | Rely on SOQL `ConversationEntry.Message` for MIAW/Enhanced |
 | Put drafts in the composer with `setAgentInput` | Call `sendTextMessage` / auto-send |
 | Keep API keys in Named / External Credentials | Put `x-api-key` in LWC or client JS |
 | Honor `messageLimit` from App Builder | Hardcode a default limit when unset |

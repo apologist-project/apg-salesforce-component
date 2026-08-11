@@ -269,7 +269,7 @@ Larger transcripts use more tokens and may hit agent or platform limits; use **N
 ## Runtime behavior
 
 1. Agent clicks **Generate Draft Reply**.
-2. Apex loads conversation entries (honoring `messageLimit`), then calls `POST /api/v1/chat/completions` with `stream: false` via the Named Credential.
+2. Apex loads the transcript via Connect REST conversation entries (Enhanced Messaging; SOQL `ConversationEntry.Message` is blank off-core), honors `messageLimit`, then calls `POST /api/v1/chat/completions` with `stream: false` via the Named Credential.
 3. The LWC shows the draft under **Generated Draft Reply**.
 4. If the session can accept composer updates, the LWC calls Conversation Toolkit [`setAgentInput`](https://developer.salesforce.com/docs/atlas.en-us.api_console.meta/api_console/sforce_api_console_lightning_setagentinput_lwc.htm) to fill the reply box (**does not** send).
 5. The human reviews, edits if needed, and sends manually.
@@ -281,7 +281,7 @@ Larger transcripts use more tokens and may hit agent or platform limits; use **N
 - **Enhanced Conversation** on the Lightning page and open in the console
 - Console app with Conversation Toolkit support
 
-If generation succeeds but the composer cannot be updated, the draft still appears in the component and a warning toast explains why.
+If generation succeeds but the composer cannot be updated, the draft still appears in the component.
 
 ---
 
@@ -316,6 +316,8 @@ sf apex run test --tests ApologistAgentServiceTest --result-format human -o apg-
 | Callout / credential errors | Named Credential URL wrong; missing `ApiKey` or `x-api-key` header; permission set not assigned |
 | Install script API key failure | Org auth expired (`sf org login web`); user lacks access to manage Named Credentials |
 | Empty or failed draft | Agent host down; API key lacks `api`; agent error — check Apex debug logs |
+| Draft ignores the chat | Connect transcript failed; check Apex debug for Connect `/connect/conversation/.../entries` errors |
+| `INVALID_SESSION_ID` on Connect | Lightning sessions are not API-enabled; the component uses VF page `ApologistApiSession` for a REST-capable token — ensure that page is deployed and the **Apologist Agent Callout** permission set is assigned |
 | Draft in component but not in reply box | Session not **Active**; Enhanced Conversation missing/closed; not in a supported console |
 | Icon missing | `cardIcon` not valid `category:name` SLDS icon |
 | Old title/icon after deploy | Page still has previous App Builder property values — edit the component properties or re-add the component |

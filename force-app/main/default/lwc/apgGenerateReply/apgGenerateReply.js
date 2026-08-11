@@ -1,5 +1,4 @@
 import { LightningElement, api } from 'lwc';
-import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 import { setAgentInput } from 'lightning/conversationToolkitApi';
 import generateDraftDetailed from '@salesforce/apex/ApologistAgentService.generateDraftDetailed';
 
@@ -141,34 +140,14 @@ export default class ApgGenerateReply extends LightningElement {
     this.draftText = draft;
 
     if (result.canFillComposer === false) {
-      this.toast(
-        'Draft ready (session not Active)',
-        result.composerHint ||
-          'Session is not Active, so the reply box cannot be filled automatically.',
-        'warning'
-      );
       this.isBusy = false;
       return;
     }
 
     try {
       // Populate the Enhanced Conversation composer; do not send.
-      const filled = await setAgentInput(this.recordId, { text: draft }, false);
-      this.toast(
-        'Draft ready',
-        filled === false
-          ? 'Draft shown below, but the conversation reply box was not updated.'
-          : 'Draft placed in the conversation reply box.',
-        filled === false ? 'warning' : 'success'
-      );
+      await setAgentInput(this.recordId, { text: draft }, false);
     } catch (error) {
-      this.toast(
-        'Draft ready (reply box not updated)',
-        'Filling the reply box failed: ' +
-          this.reduceError(error) +
-          ' Make sure this Messaging Session is Active, owned by you, and the Enhanced Conversation panel is open.',
-        'warning'
-      );
       // eslint-disable-next-line no-console
       console.error('apgGenerateReply setAgentInput', error);
     } finally {
@@ -178,7 +157,6 @@ export default class ApgGenerateReply extends LightningElement {
 
   fail(message, error) {
     this.errorMessage = message;
-    this.toast('Could not generate reply', message, 'error');
     // eslint-disable-next-line no-console
     console.error('apgGenerateReply', message, error || '');
   }
@@ -232,16 +210,5 @@ export default class ApgGenerateReply extends LightningElement {
     } catch (e) {
       return 'Unknown error';
     }
-  }
-
-  toast(title, message, variant) {
-    this.dispatchEvent(
-      new ShowToastEvent({
-        title,
-        message,
-        variant,
-        mode: 'sticky'
-      })
-    );
   }
 }

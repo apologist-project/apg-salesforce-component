@@ -131,6 +131,50 @@ private class ApologistAgentServiceTest {
     System.assertEquals('Unwrapped draft', ApologistAgentService.extractContent(body));
   }
 
+  @IsTest
+  static void parseConnectEntries_readsMessageTextAndRoles() {
+    String body =
+      '{"conversationEntries":[' +
+      '{"messageText":"Where is God?","sender":{"role":"EndUser"},"serverReceivedTimestamp":1000},' +
+      '{"messageText":"I&#39;m here for you.","sender":{"role":"Agent"},"serverReceivedTimestamp":2000}' +
+      ']}';
+    List<ApologistConversationContext.Message> messages = ApologistConversationContext.parseConnectEntries(
+      body
+    );
+    System.assertEquals(2, messages.size());
+    System.assertEquals('EndUser', messages[0].actorType);
+    System.assertEquals('Where is God?', messages[0].body);
+    System.assertEquals('Agent', messages[1].actorType);
+    System.assertEquals('I\'m here for you.', messages[1].body);
+  }
+
+  @IsTest
+  static void parseConnectEntries_skipsBlankMessageText() {
+    String body =
+      '{"conversationEntries":[' +
+      '{"messageText":"","sender":{"role":"System"}},' +
+      '{"sender":{"role":"EndUser"},"messageText":"Hello"}' +
+      ']}';
+    List<ApologistConversationContext.Message> messages = ApologistConversationContext.parseConnectEntries(
+      body
+    );
+    System.assertEquals(1, messages.size());
+    System.assertEquals('Hello', messages[0].body);
+  }
+
+  @IsTest
+  static void buildPrompt_usesUnescapedCustomerText() {
+    List<ApologistConversationContext.Message> messages = new List<ApologistConversationContext.Message>{
+      new ApologistConversationContext.Message(
+        'EndUser',
+        ApologistConversationContext.unescapeHtml('I don&#39;t know'),
+        Datetime.now()
+      )
+    };
+    String prompt = ApologistConversationContext.buildPrompt(messages);
+    System.assert(prompt.contains('Customer: I don\'t know'));
+  }
+
   private static List<ApologistConversationContext.Message> sampleMessages(Integer count) {
     List<ApologistConversationContext.Message> messages = new List<ApologistConversationContext.Message>();
     Datetime base = Datetime.now().addHours(-1);
