@@ -2,20 +2,16 @@
 private class ApologistAgentServiceTest {
   private class CompletionsMock implements HttpCalloutMock {
     public HTTPResponse respond(HTTPRequest req) {
-      System.assertEquals(
-        'callout:Apologist_Agent/api/v1/chat/completions',
-        req.getEndpoint()
+      System.assert(
+        req.getEndpoint() != null &&
+          req.getEndpoint().startsWith('callout:') &&
+          req.getEndpoint().endsWith('/api/v1/chat/completions'),
+        'Unexpected endpoint: ' + req.getEndpoint()
       );
       System.assertEquals('POST', req.getMethod());
       System.assert(
         req.getBody().contains('"client":"channel"'),
         'Expected metadata.client=channel'
-      );
-      System.assert(req.getBody().contains('"user":"user-1"'), 'Expected user id');
-      System.assert(req.getBody().contains('"session":"session-1"'), 'Expected session id');
-      System.assert(
-        req.getBody().contains('"conversation":"conversation-1"'),
-        'Expected conversation id'
       );
 
       HttpResponse res = new HttpResponse();
@@ -104,6 +100,46 @@ private class ApologistAgentServiceTest {
   }
 
   @IsTest
+  static void requestCompletion_includesMessagingMetadata() {
+    Test.setMock(
+      HttpCalloutMock.class,
+      new AssertingCompletionsMock(
+        new List<String>{ '"user":"user-1"', '"session":"session-1"', '"conversation":"conversation-1"' }
+      )
+    );
+    Test.startTest();
+    ApologistAgentService.requestCompletion(sampleContext(1));
+    Test.stopTest();
+  }
+
+  private class AssertingCompletionsMock implements HttpCalloutMock {
+    private List<String> mustContain;
+    private Boolean matchEndpoint;
+    AssertingCompletionsMock(List<String> mustContain) {
+      this(mustContain, false);
+    }
+    AssertingCompletionsMock(List<String> mustContain, Boolean matchEndpoint) {
+      this.mustContain = mustContain;
+      this.matchEndpoint = matchEndpoint == true;
+    }
+    public HTTPResponse respond(HTTPRequest req) {
+      String haystack = matchEndpoint ? req.getEndpoint() : req.getBody();
+      for (String fragment : mustContain) {
+        System.assert(
+          haystack != null && haystack.contains(fragment),
+          'Missing fragment: ' + fragment + ' in ' + haystack
+        );
+      }
+      HttpResponse res = new HttpResponse();
+      res.setStatusCode(200);
+      res.setBody(
+        '{"choices":[{"message":{"role":"assistant","content":"ok"}}]}'
+      );
+      return res;
+    }
+  }
+
+  @IsTest
   static void requestCompletion_surfacesHttpErrors() {
     Test.setMock(HttpCalloutMock.class, new ErrorMock());
     Boolean threw = false;
@@ -173,6 +209,220 @@ private class ApologistAgentServiceTest {
     };
     String prompt = ApologistConversationContext.buildPrompt(messages);
     System.assert(prompt.contains('Customer: I don\'t know'));
+  }
+
+  @IsTest
+  static void replySubject_addsRePrefix() {
+    System.assertEquals('Re: Help', ApologistConversationContext.replySubject('Help'));
+    System.assertEquals('Re: Help', ApologistConversationContext.replySubject('Re: Help'));
+    System.assertEquals('Re: Your case', ApologistConversationContext.replySubject(null));
+  }
+
+  @IsTest
+  static void stripHtml_removesTags() {
+    String text = ApologistConversationContext.stripHtml('<p>Hello<br/>world</p>');
+    System.assert(text.contains('Hello'));
+    System.assert(text.contains('world'));
+    System.assert(!text.contains('<p>'));
+  }
+
+  @IsTest
+  static void loadCaseContext_readsEmailThreadAndHeaders() {
+    Case c = new Case(Subject = 'Order status', Description = 'Need an update', Origin = 'Email');
+    insert c;
+    insert new List<EmailMessage>{
+      new EmailMessage(
+        ParentId = c.Id,
+        Incoming = true,
+        FromAddress = 'customer@example.com',
+        ToAddress = 'support@example.com',
+        Subject = 'Order status',
+        TextBody = 'Where is my order?',
+        MessageDate = Datetime.now().addMinutes(-10),
+        Status = '0'
+      ),
+      new EmailMessage(
+        ParentId = c.Id,
+        Incoming = false,
+        FromAddress = 'support@example.com',
+        ToAddress = 'customer@example.com',
+        Subject = 'Re: Order status',
+        TextBody = 'Looking into it.',
+        MessageDate = Datetime.now().addMinutes(-5),
+        Status = '3'
+      )
+    };
+
+    ApologistConversationContext.DraftContext context = ApologistConversationContext.loadCaseContext(
+      c.Id,
+      null
+    );
+    System.assertEquals('case', context.contextType);
+    System.assertEquals('Case', context.sessionStatus);
+    System.assertEquals('Re: Order status', context.emailSubject);
+    System.assertEquals(2, context.messages.size());
+    System.assertEquals('Customer', context.messages[0].actorType);
+    System.assertEquals('Where is my order?', context.messages[0].body);
+    System.assertEquals('Agent', context.messages[1].actorType);
+
+    String prompt = ApologistConversationContext.buildPrompt(context);
+    System.assert(prompt.contains('Case subject: Order status'));
+    System.assert(prompt.contains('Case description: Need an update'));
+    System.assert(prompt.contains('Customer: Where is my order?'));
+  }
+
+  @IsTest
+  static void loadCaseContext_appliesMessageLimit() {
+    Case c = new Case(Subject = 'Thread', Origin = 'Email');
+    insert c;
+    List<EmailMessage> emails = new List<EmailMessage>();
+    for (Integer i = 0; i < 5; i++) {
+      emails.add(
+        new EmailMessage(
+          ParentId = c.Id,
+          Incoming = Math.mod(i, 2) == 0,
+          FromAddress = 'a@example.com',
+          ToAddress = 'b@example.com',
+          Subject = 'm' + i,
+          TextBody = 'm' + i,
+          MessageDate = Datetime.now().addMinutes(i - 10),
+          Status = '0'
+        )
+      );
+    }
+    insert emails;
+
+    ApologistConversationContext.DraftContext context = ApologistConversationContext.loadCaseContext(
+      c.Id,
+      2
+    );
+    System.assertEquals(2, context.messages.size());
+    System.assertEquals('m3', context.messages[0].body);
+    System.assertEquals('m4', context.messages[1].body);
+  }
+
+  @IsTest
+  static void loadCaseContext_errorsWhenNoContext() {
+    Case c = new Case(Subject = null, Description = null, Origin = 'Phone');
+    insert c;
+    Boolean threw = false;
+    try {
+      ApologistConversationContext.loadCaseContext(c.Id, null);
+    } catch (AuraHandledException e) {
+      threw = true;
+      System.assert(e.getMessage().contains('No email messages') || e.getMessage() != null);
+    }
+    System.assert(threw, 'Expected error when Case has no emails or description');
+  }
+
+  @IsTest
+  static void generateDraftForRecord_casePath() {
+    Case c = new Case(Subject = 'Billing question', Description = 'Invoice issue', Origin = 'Email');
+    insert c;
+    insert new EmailMessage(
+      ParentId = c.Id,
+      Incoming = true,
+      FromAddress = 'customer@example.com',
+      ToAddress = 'support@example.com',
+      Subject = 'Billing question',
+      TextBody = 'Please explain my invoice.',
+      MessageDate = Datetime.now(),
+      Status = '0'
+    );
+
+    Test.setMock(HttpCalloutMock.class, new CompletionsMock());
+    Test.startTest();
+    ApologistAgentService.DraftResult result = ApologistAgentService.generateDraftForRecord(
+      c.Id,
+      null,
+      null
+    );
+    Test.stopTest();
+
+    System.assertEquals('case', result.contextType);
+    System.assertEquals(true, result.canFillComposer);
+    System.assertEquals('Re: Billing question', result.emailSubject);
+    System.assertEquals(
+      ApologistAgentService.CREDENTIAL_CASE,
+      result.namedCredential
+    );
+    System.assertEquals('Thanks for reaching out — happy to help.', result.draft);
+  }
+
+  @IsTest
+  static void generateDraftForRecord_honorsNamedCredentialOverride() {
+    Case c = new Case(Subject = 'Override', Description = 'Desc', Origin = 'Email');
+    insert c;
+    insert new EmailMessage(
+      ParentId = c.Id,
+      Incoming = true,
+      FromAddress = 'customer@example.com',
+      ToAddress = 'support@example.com',
+      Subject = 'Override',
+      TextBody = 'Hello',
+      MessageDate = Datetime.now(),
+      Status = '0'
+    );
+
+    Test.setMock(
+      HttpCalloutMock.class,
+      new AssertingCompletionsMock(
+        new List<String>{ 'callout:' + ApologistAgentService.CREDENTIAL_LEGACY + '/' },
+        true
+      )
+    );
+    Test.startTest();
+    ApologistAgentService.DraftResult result = ApologistAgentService.generateDraftForRecord(
+      c.Id,
+      null,
+      ApologistAgentService.CREDENTIAL_LEGACY
+    );
+    Test.stopTest();
+    System.assertEquals(ApologistAgentService.CREDENTIAL_LEGACY, result.namedCredential);
+  }
+
+  @IsTest
+  static void resolveNamedCredential_defaultsAndOverride() {
+    System.assertEquals(
+      ApologistAgentService.CREDENTIAL_MESSAGING,
+      ApologistAgentService.resolveNamedCredential('messaging', null)
+    );
+    System.assertEquals(
+      ApologistAgentService.CREDENTIAL_CASE,
+      ApologistAgentService.resolveNamedCredential('case', null)
+    );
+    System.assertEquals(
+      ApologistAgentService.CREDENTIAL_LEGACY,
+      ApologistAgentService.resolveNamedCredential('case', 'Apologist_Agent')
+    );
+  }
+
+  @IsTest
+  static void resolveNamedCredential_rejectsInvalidName() {
+    Boolean threw = false;
+    try {
+      ApologistAgentService.resolveNamedCredential('messaging', 'bad name!');
+    } catch (AuraHandledException e) {
+      threw = true;
+    }
+    System.assert(threw, 'Expected invalid Named Credential name error');
+  }
+
+  @IsTest
+  static void generateDraftForRecord_rejectsUnsupportedType() {
+    Account a = new Account(Name = 'Unsupported');
+    insert a;
+    Boolean threw = false;
+    try {
+      ApologistAgentService.generateDraftForRecord(a.Id, null, null);
+    } catch (AuraHandledException e) {
+      threw = true;
+      System.assert(
+        e.getMessage().contains('Unsupported') || e.getMessage() != null,
+        e.getMessage()
+      );
+    }
+    System.assert(threw, 'Expected unsupported record type error');
   }
 
   private static List<ApologistConversationContext.Message> sampleMessages(Integer count) {

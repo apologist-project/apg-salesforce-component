@@ -1,6 +1,8 @@
 import { LightningElement, api } from 'lwc';
+import { NavigationMixin } from 'lightning/navigation';
+import { encodeDefaultFieldValues } from 'lightning/pageReferenceUtils';
 import { setAgentInput } from 'lightning/conversationToolkitApi';
-import generateDraftDetailed from '@salesforce/apex/ApologistAgentService.generateDraftDetailed';
+import generateDraftForRecord from '@salesforce/apex/ApologistAgentService.generateDraftForRecord';
 
 const DEFAULT_TITLE = 'Apologist Agent';
 const DEFAULT_DESCRIPTION = 'Generate a draft reply from the Apologist Agent API.';
@@ -8,13 +10,13 @@ const DEFAULT_ICON = 'standard:sparkles';
 const DEFAULT_BUTTON_COLOR = '#7137ff';
 const DEFAULT_ICON_BACKGROUND_COLOR = '#7137ff';
 
-export default class ApgGenerateReply extends LightningElement {
-  /** Messaging Session Id (set by the record page). */
+export default class ApgGenerateReply extends NavigationMixin(LightningElement) {
+  /** Messaging Session or Case Id (set by the record page). */
   @api recordId;
 
   /**
    * Past messages to include when building the Agent API prompt.
-   * Null / empty / unset = entire conversation.
+   * Null / empty / unset = entire conversation / email thread.
    * Positive integer N = N most recent messages.
    */
   @api messageLimit;
@@ -36,6 +38,14 @@ export default class ApgGenerateReply extends LightningElement {
 
   /** Hex (or CSS) color for the card header icon background. */
   @api iconBackgroundColor;
+
+  /**
+   * Named Credential API name for this widget instance's Agent (URL + API key).
+   * Leave blank to use Apologist_Agent_Messaging (Messaging Session) or
+   * Apologist_Agent_Case (Case). Create additional Named Credentials in Setup
+   * to point different page placements at different Agents.
+   */
+  @api namedCredential;
 
   isBusy = false;
   draftText = '';
@@ -110,7 +120,7 @@ export default class ApgGenerateReply extends LightningElement {
     this.draftText = '';
 
     if (!this.recordId) {
-      this.fail('No Messaging Session Id on this page.');
+      this.fail('No record Id on this page.');
       return;
     }
     if (this.isBusy) {
@@ -120,9 +130,10 @@ export default class ApgGenerateReply extends LightningElement {
     this.isBusy = true;
     let result;
     try {
-      result = await generateDraftDetailed({
-        messagingSessionId: this.recordId,
-        messageLimit: this.resolvedMessageLimit()
+      result = await generateDraftForRecord({
+        recordId: this.recordId,
+        messageLimit: this.resolvedMessageLimit(),
+        namedCredential: this.namedCredential || null
       });
     } catch (error) {
       this.fail('Agent call failed: ' + this.reduceError(error), error);
@@ -139,19 +150,58 @@ export default class ApgGenerateReply extends LightningElement {
 
     this.draftText = draft;
 
-    if (result.canFillComposer === false) {
-      this.isBusy = false;
-      return;
-    }
-
     try {
-      // Populate the Enhanced Conversation composer; do not send.
-      await setAgentInput(this.recordId, { text: draft }, false);
+      if (result.contextType === 'case') {
+        await this.openCaseEmailComposer(draft, result.emailSubject);
+      } else if (result.canFillComposer !== false) {
+        // Populate the Enhanced Conversation composer; do not send.
+        await setAgentInput(this.recordId, { text: draft }, false);
+      }
     } catch (error) {
+      // Draft remains visible for copy/paste.
       // eslint-disable-next-line no-console
-      console.error('apgGenerateReply setAgentInput', error);
+      console.error('apgGenerateReply composer step', error);
+      this.errorMessage =
+        'Draft ready below, but the composer could not be opened or filled: ' +
+        this.reduceError(error);
     } finally {
       this.isBusy = false;
+    }
+  }
+
+  /**
+   * Opens Case Send Email with the draft pre-filled. Does not send.
+   */
+  async openCaseEmailComposer(draft, emailSubject) {
+    const defaults = {
+      HtmlBody: draft
+    };
+    if (emailSubject) {
+      defaults.Subject = emailSubject;
+    }
+
+    const state = {
+      recordId: this.recordId,
+      defaultFieldValues: encodeDefaultFieldValues(defaults)
+    };
+
+    try {
+      await this[NavigationMixin.Navigate]({
+        type: 'standard__quickAction',
+        attributes: {
+          apiName: 'Case.SendEmail'
+        },
+        state
+      });
+    } catch (caseActionError) {
+      // Some orgs only expose the global Send Email action.
+      await this[NavigationMixin.Navigate]({
+        type: 'standard__quickAction',
+        attributes: {
+          apiName: 'Global.SendEmail'
+        },
+        state
+      });
     }
   }
 

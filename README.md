@@ -1,6 +1,9 @@
 # apg-salesforce-component
 
-Salesforce Lightning Web Component that drafts Service Cloud (Enhanced Messaging) replies using the [Apologist Agent API](https://github.com/apologist-project/apg-agent), then places the text in the conversation composer for a human to review and send.
+Salesforce Lightning Web Component that drafts Service Cloud replies using the [Apologist Agent API](https://github.com/apologist-project/apg-agent) for:
+
+- **Messaging Session** (Enhanced Messaging) — fills the conversation reply box via `setAgentInput`
+- **Case** (email) — builds context from the Case `EmailMessage` thread and opens **Send Email** with the draft pre-filled
 
 The draft is **never** auto-submitted.
 
@@ -9,7 +12,7 @@ The draft is **never** auto-submitted.
 | App Builder component | **Apologist Generate Reply** |
 | LWC API name | `apgGenerateReply` |
 | Apex | `ApologistAgentService`, `ApologistConversationContext` |
-| Callout | Named Credential `Apologist_Agent` |
+| Callout | Named Credentials `Apologist_Agent_Messaging` / `Apologist_Agent_Case` (per-instance override supported) |
 
 ---
 
@@ -45,7 +48,7 @@ You will need from Apologist:
 | Ensure External Credential custom header `x-api-key` | Yes |
 | Inject Agent API key into principal `ApiKey` | Yes |
 | Messaging / Omni-Channel / Experience site setup | No (org prerequisites) |
-| Place LWC on Messaging Session Lightning page | No (App Builder; see below) |
+| Place LWC on Messaging Session / Case Lightning pages | No (App Builder; see below) |
 
 ### Quick start
 
@@ -55,10 +58,34 @@ cd apg-salesforce-component
 
 sf org login web -a apg-sf
 
+# Same Agent for both contexts (+ legacy)
 ./scripts/install.sh \
   --org apg-sf \
+  --for both \
   --agent-url https://your-agent.example.com \
   --api-key "$APOLOGIST_API_KEY"
+
+# Messaging (chat) Agent only
+./scripts/install.sh \
+  --org apg-sf \
+  --for messaging \
+  --agent-url https://chat-agent.example.com \
+  --api-key "$CHAT_KEY"
+
+# Case (email) Agent only
+./scripts/install.sh \
+  --org apg-sf \
+  --for case \
+  --agent-url https://email-agent.example.com \
+  --api-key "$EMAIL_KEY"
+
+# Or set each Agent explicitly (no --for)
+./scripts/install.sh \
+  --org apg-sf \
+  --messaging-agent-url https://chat-agent.example.com \
+  --messaging-api-key "$CHAT_KEY" \
+  --case-agent-url https://email-agent.example.com \
+  --case-api-key "$EMAIL_KEY"
 ```
 
 Equivalent environment variables:
@@ -66,8 +93,10 @@ Equivalent environment variables:
 | Variable | Flag |
 |----------|------|
 | `SF_TARGET_ORG` | `--org` |
-| `APOLOGIST_AGENT_URL` | `--agent-url` |
-| `APOLOGIST_API_KEY` | `--api-key` |
+| `APOLOGIST_INSTALL_FOR` | `--for` (`messaging` / `case` / `both`) |
+| `APOLOGIST_AGENT_URL` / `APOLOGIST_API_KEY` | `--agent-url` / `--api-key` (scoped by `--for`) |
+| `APOLOGIST_MESSAGING_AGENT_URL` / `APOLOGIST_MESSAGING_API_KEY` | `--messaging-agent-url` / `--messaging-api-key` |
+| `APOLOGIST_CASE_AGENT_URL` / `APOLOGIST_CASE_API_KEY` | `--case-agent-url` / `--case-api-key` |
 | `SF_API_VERSION` | *(default `67.0`)* |
 
 ### Script options
@@ -75,45 +104,59 @@ Equivalent environment variables:
 ```text
 ./scripts/install.sh --help
 
-Required:
-  --org, -o           Salesforce org alias or username
-  --agent-url         Agent origin only (https://host, no /api/v1)
-  --api-key           Agent API key (or set APOLOGIST_API_KEY)
+Org / deploy:
+  --org, -o
+  --skip-deploy, --skip-permset, --full-project, --dry-run, --assign-user
 
-Optional:
-  --assign-user       Username for the callout permission set
-                      (default: authenticated org user)
-  --skip-deploy       Configure credentials only (metadata already deployed)
-  --skip-permset      Skip permission set assignment
-  --full-project      Deploy entire force-app (default: component stack only)
-  --dry-run           Print actions without deploying or calling APIs
+Context:
+  --for messaging|case|both   Scope --agent-url/--api-key (aliases: chat, email, all)
+
+Credentials:
+  --agent-url / --api-key                         Agent pair (used with --for)
+  --messaging-agent-url / --messaging-api-key     Messaging Named Credential
+  --case-agent-url / --case-api-key               Case Named Credential
 ```
 
 Examples:
 
 ```bash
-# Preview without changing the org
-./scripts/install.sh --org apg-sf \
-  --agent-url https://your-agent.example.com \
-  --api-key "$APOLOGIST_API_KEY" \
+# Preview messaging-only install
+./scripts/install.sh --org apg-sf --for messaging \
+  --agent-url https://chat-agent.example.com \
+  --api-key "$CHAT_KEY" \
   --dry-run
 
-# Rotate API key / URL only
-./scripts/install.sh --org apg-sf \
-  --agent-url https://your-agent.example.com \
-  --api-key "$APOLOGIST_API_KEY" \
+# Rotate Case agent only
+./scripts/install.sh --org apg-sf --for case \
+  --agent-url https://email-agent.example.com \
+  --api-key "$EMAIL_KEY" \
   --skip-deploy --skip-permset
 ```
 
-The script strips a trailing `/api/v1` from `--agent-url` if present. Secrets are passed to the Connect API in memory and are not written to the repo.
+The script strips a trailing `/api/v1` from agent URLs if present. Secrets are passed to the Connect API in memory and are not written to the repo.
+
+**API keys are never App Builder properties.** Each Agent’s URL + key live in a Named Credential. For a different Agent on a specific page, create another Named Credential in Setup and set the component’s **Named Credential** property to that API name.
 
 ### After the script
+
+Add the component on each surface you need:
+
+**Messaging Session**
 
 1. Open a **Messaging Session** record → **Edit Page**.
 2. Add **Apologist Generate Reply** (keep **Enhanced Conversation** on the page).
 3. Set [configurable parameters](#configurable-parameters) as needed.
 4. **Save** and **Activate**.
 5. Accept an **Active** messaging session in Omni-Channel and click **Generate Draft Reply**.
+
+**Case (email)**
+
+1. Open a **Case** record → **Edit Page** (or Setup → Object Manager → Case → Lightning Record Pages).
+2. Add **Apologist Generate Reply**.
+3. Set [configurable parameters](#configurable-parameters) as needed.
+4. **Save** and **Activate**.
+5. Open a Case with related emails, click **Generate Draft Reply** — the draft appears in the widget and **Send Email** opens with the body pre-filled.
+6. Ensure **HtmlBody** / **Subject** are not read-only on the Case **Send Email** quick action layout (otherwise defaults may not apply).
 
 ---
 
@@ -156,33 +199,44 @@ sf project deploy start -o apg-sf-scratch
 
 ### 3. Configure the Agent API (Named Credential)
 
-Callouts use `callout:Apologist_Agent/api/v1/chat/completions`. Secrets stay in Salesforce — not in the LWC.
+Callouts use `callout:<NamedCredential>/api/v1/chat/completions`. Secrets stay in Salesforce — not in the LWC.
 
-Metadata ships with placeholder URL `https://YOUR-AGENT-DOMAIN.example`. Set the real origin and API key in Setup after deploy (or use the install script).
+| Context | Default Named Credential | External Credential |
+|---------|--------------------------|---------------------|
+| Messaging Session | `Apologist_Agent_Messaging` | `Apologist_Agent_Messaging` |
+| Case email | `Apologist_Agent_Case` | `Apologist_Agent_Case` |
+| Legacy / override | `Apologist_Agent` | `Apologist_Agent` |
+
+Metadata ships with placeholder URLs. Set the real origin and API key in Setup after deploy (or use the install script).
+
+For **each** Agent credential pair:
 
 #### A. External Credential (API key)
 
-1. **Setup** → search **Named Credentials** → open **External Credentials**.
-2. Open **Apologist Agent** (`Apologist_Agent`).
+1. **Setup** → **Named Credentials** → **External Credentials**.
+2. Open the External Credential (e.g. **Apologist Agent Messaging**).
 3. Confirm protocol is **Custom** and principal **ApologistAgentPrincipal** exists.
 4. Open **ApologistAgentPrincipal** → **Add** (or edit) an authentication parameter:
    - **Name:** `ApiKey`
-   - **Value:** your Agent API key
-5. On the External Credential, **Custom Headers** → **New**:
+   - **Value:** that Agent’s API key
+5. **Custom Headers** → **New**:
    - **Name:** `x-api-key`
-   - **Value:** `{!$Credential.Apologist_Agent.ApiKey}`
+   - **Value:** `{!$Credential.<ExternalCredentialApiName>.ApiKey}`  
+     (e.g. `{!$Credential.Apologist_Agent_Messaging.ApiKey}`)
 
 #### B. Named Credential (agent URL)
 
-1. **Setup** → **Named Credentials** → **Apologist Agent**.
-2. Set **URL** to your agent **origin only** (no path), e.g. `https://your-agent.example.com`.
+1. **Setup** → **Named Credentials** → matching Named Credential.
+2. Set **URL** to that agent **origin only** (no path).
 3. Confirm:
-   - **External Credential:** `Apologist_Agent`
+   - **External Credential:** matching External Credential
    - **Generate Authorization Header:** off
-   - **Allow Formulas in HTTP Header:** on (required for the merge field above)
+   - **Allow Formulas in HTTP Header:** on
 4. Save.
 
-If you also use the optional **Remote Site Setting** stub, update its URL to the same origin (Named Credentials do not require a matching remote site).
+Repeat for Messaging and Case (and any extra Named Credentials you create for other widget instances). Grant the **Apologist Agent Callout** permission set access to each new External Credential principal.
+
+If you also use the optional **Remote Site Setting** stub, update its URL as needed (Named Credentials do not require a matching remote site).
 
 #### C. Permission set
 
@@ -194,11 +248,13 @@ sf org assign permset -n Apologist_Agent_Callout -o apg-sf
 
 Or: **Setup** → **Users** → user → **Permission Set Assignments** → add **Apologist Agent Callout**.
 
-### 4. Add the component to the Messaging Session page
+### 4. Add the component to Messaging Session and/or Case pages
 
 Same steps as [After the script](#after-the-script).
 
 ### 5. Verify
+
+**Messaging**
 
 1. Accept an inbound messaging session in Omni-Channel so the session is **Active** and owned by you.
 2. Open the Messaging Session with Enhanced Conversation visible.
@@ -206,11 +262,18 @@ Same steps as [After the script](#after-the-script).
 4. Confirm a draft appears in the component and in the conversation reply box.
 5. Edit if needed and send manually — this component does not send.
 
+**Case email**
+
+1. Open a Case that has related **EmailMessage** rows (or at least a Description).
+2. Click **Generate Draft Reply**.
+3. Confirm the draft appears in the widget and Send Email opens with the body pre-filled.
+4. Review and send manually — this component does not send.
+
 ---
 
 ## Configurable parameters
 
-Set these in Lightning App Builder by selecting **Apologist Generate Reply** on the Messaging Session page. Values are per page assignment (white-label branding is done here; the App Builder list name stays **Apologist Generate Reply**).
+Set these in Lightning App Builder by selecting **Apologist Generate Reply** on a Messaging Session or Case page. Values are per page assignment (white-label branding is done here; the App Builder list name stays **Apologist Generate Reply**).
 
 | App Builder label | API property | Type | Default | Description |
 |-------------------|--------------|------|---------|-------------|
@@ -219,7 +282,8 @@ Set these in Lightning App Builder by selecting **Apologist Generate Reply** on 
 | **Icon name** | `cardIcon` | String | `standard:sparkles` | SLDS icon for the card header. |
 | **Icon background color** | `iconBackgroundColor` | String | `#7137ff` | Background color for the card header icon. |
 | **Button color** | `buttonColor` | String | `#7137ff` | Background/border color for **Generate Draft Reply**. |
-| **Past messages to include** | `messageLimit` | Integer | *(blank)* | How much transcript to send to the Agent API. |
+| **Past messages to include** | `messageLimit` | Integer | *(blank)* | How much Messaging transcript or Case email thread to send to the Agent API. |
+| **Named Credential** | `namedCredential` | String | *(blank)* | Named Credential API name for this instance’s Agent. Blank → `Apologist_Agent_Messaging` or `Apologist_Agent_Case` by page type. |
 
 Button label (**Generate Draft Reply**) and the draft field label (**Generated Draft Reply**) are fixed in the component.
 
@@ -252,15 +316,22 @@ CSS color for the **Generate Draft Reply** brand button (hex recommended, e.g. `
 
 Applied via SLDS button brand styling hooks (`--slds-c-button-brand-color-background` / border, including hover).
 
+### Named Credential (per-instance Agent)
+
+Each Agent has its own URL + API key, stored in a Salesforce Named Credential (not in the LWC).
+
+- Leave **Named Credential** blank to use the context default (`Apologist_Agent_Messaging` or `Apologist_Agent_Case`).
+- To point one page placement at a different Agent: create a Named Credential + External Credential in Setup, grant principal access on **Apologist Agent Callout**, then set this property to the Named Credential’s API name.
+
 ### Past messages to include
 
-Controls how much of the Messaging Session transcript is sent to `POST /api/v1/chat/completions`:
+Controls how much context is sent to `POST /api/v1/chat/completions`:
 
 | Value | Behavior |
 |-------|----------|
-| Blank / unset | Entire conversation |
+| Blank / unset | Entire Messaging conversation or Case email thread |
 | Positive integer **N** | **N** most recent messages (prompt still chronological) |
-| Zero or negative | Treated as entire conversation |
+| Zero or negative | Treated as entire thread |
 
 Larger transcripts use more tokens and may hit agent or platform limits; use **N** when sessions run long.
 
@@ -269,19 +340,30 @@ Larger transcripts use more tokens and may hit agent or platform limits; use **N
 ## Runtime behavior
 
 1. Agent clicks **Generate Draft Reply**.
-2. Apex loads the transcript via Connect REST conversation entries (Enhanced Messaging; SOQL `ConversationEntry.Message` is blank off-core), honors `messageLimit`, then calls `POST /api/v1/chat/completions` with `stream: false` via the Named Credential.
-3. The LWC shows the draft under **Generated Draft Reply**.
-4. If the session can accept composer updates, the LWC calls Conversation Toolkit [`setAgentInput`](https://developer.salesforce.com/docs/atlas.en-us.api_console.meta/api_console/sforce_api_console_lightning_setagentinput_lwc.htm) to fill the reply box (**does not** send).
-5. The human reviews, edits if needed, and sends manually.
+2. Apex detects **Messaging Session** vs **Case**:
+   - **Messaging:** loads transcript via Connect REST conversation entries (Enhanced Messaging; SOQL `ConversationEntry.Message` is blank off-core)
+   - **Case:** loads related `EmailMessage` rows (plus Case subject/description preamble)
+3. Apex honors `messageLimit`, then calls `POST /api/v1/chat/completions` with `stream: false` via the Named Credential.
+4. The LWC shows the draft under **Generated Draft Reply**.
+5. Composer step (**does not** send):
+   - **Messaging (Active):** Conversation Toolkit [`setAgentInput`](https://developer.salesforce.com/docs/atlas.en-us.api_console.meta/api_console/sforce_api_console_lightning_setagentinput_lwc.htm)
+   - **Case:** navigates to **Case.SendEmail** (fallback `Global.SendEmail`) with `HtmlBody` / `Subject` pre-filled via `encodeDefaultFieldValues`
+6. The human reviews, edits if needed, and sends manually.
 
-### Requirements for filling the reply box
+### Requirements for Messaging reply box fill
 
 - Messaging Session status **Active** (accepted from Omni-Channel; not Waiting / queue-owned only)
 - Running user owns / can work the session
 - **Enhanced Conversation** on the Lightning page and open in the console
 - Console app with Conversation Toolkit support
 
-If generation succeeds but the composer cannot be updated, the draft still appears in the component.
+### Requirements for Case email pre-fill
+
+- Case has related emails and/or a Description
+- Case **Send Email** quick action available on the page/layout
+- **HtmlBody** and **Subject** not marked read-only on that action’s layout
+
+If generation succeeds but the composer cannot be updated/opened, the draft still appears in the component.
 
 ---
 
@@ -313,12 +395,16 @@ sf apex run test --tests ApologistAgentServiceTest --result-format human -o apg-
 
 | Symptom | Likely cause |
 |---------|----------------|
-| Callout / credential errors | Named Credential URL wrong; missing `ApiKey` or `x-api-key` header; permission set not assigned |
+| Callout / credential errors | Named Credential URL wrong; missing `ApiKey` or `x-api-key` header; permission set not assigned; wrong **Named Credential** property |
+| Wrong Agent answered | Messaging vs Case defaults differ; check App Builder **Named Credential** and which NC URL/key is configured |
 | Install script API key failure | Org auth expired (`sf org login web`); user lacks access to manage Named Credentials |
 | Empty or failed draft | Agent host down; API key lacks `api`; agent error — check Apex debug logs |
 | Draft ignores the chat | Connect transcript failed; check Apex debug for Connect `/connect/conversation/.../entries` errors |
 | `INVALID_SESSION_ID` on Connect | Lightning sessions are not API-enabled; the component uses VF page `ApologistApiSession` for a REST-capable token — ensure that page is deployed and the **Apologist Agent Callout** permission set is assigned |
 | Draft in component but not in reply box | Session not **Active**; Enhanced Conversation missing/closed; not in a supported console |
+| Case draft OK but email fields empty | HtmlBody/Subject read-only on Send Email action layout; or Case.SendEmail missing — try adding the Email action |
+| Case “no context” error | No related EmailMessage rows and empty Case Description |
+| Component missing from Case App Builder | Redeploy LWC meta (Case must be listed in targets); hard-refresh App Builder |
 | Icon missing | `cardIcon` not valid `category:name` SLDS icon |
 | Old title/icon after deploy | Page still has previous App Builder property values — edit the component properties or re-add the component |
 

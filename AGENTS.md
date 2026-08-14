@@ -1,50 +1,37 @@
 # AGENTS.md — apg-salesforce-component
 
-Salesforce DX project: Lightning Web Component + Apex that drafts Enhanced Messaging replies via the Apologist **Agent API** (not the beacon embed).
+Salesforce DX project: Lightning Web Component + Apex that drafts Service Cloud replies via the Apologist **Agent API** (not the beacon embed) for **Messaging Session** and **Case** email.
 
 ## Stack
 
 - Salesforce DX (`sfdx-project.json`, `force-app/`)
-- LWC: `apgGenerateReply` on **MessagingSession** record pages
-- Apex: `ApologistAgentService` (Agent API callout), `ApologistConversationContext` (transcript + limit)
-- Auth: Named Credential `Apologist_Agent` + External Credential (header `x-api-key`)
-- Transcript: Connect REST `GET /services/data/vXX.X/connect/conversation/{ConversationIdentifier}/entries` (Enhanced Messaging bodies are off-core; SOQL `ConversationEntry.Message` is blank)
-- Same-org Connect auth: Visualforce `ApologistApiSession` (`{!$Api.Session_ID}`) — Lightning `UserInfo.getSessionId()` is not API-enabled
+- LWC: `apgGenerateReply` on **MessagingSession** and **Case** record pages
+- Apex: `ApologistAgentService.generateDraftForRecord(recordId, messageLimit, namedCredential)`
+- Auth (API key per Agent):
+  - Default Messaging: Named Credential `Apologist_Agent_Messaging`
+  - Default Case: Named Credential `Apologist_Agent_Case`
+  - Optional per-instance override via App Builder `namedCredential`
+  - Legacy `Apologist_Agent` still deployable for overrides / migration
+- Messaging transcript: Connect REST conversation entries (+ VF `ApologistApiSession` for API session)
+- Case transcript: related `EmailMessage` (+ Case subject/description preamble)
 
 ## Do / don’t
 
 | Do | Don’t |
 |----|--------|
 | `POST /api/v1/chat/completions` with `stream: false` | Embed `/beacon/agent*.js` for this draft flow |
-| Load Enhanced Messaging text via Connect conversation entries | Rely on SOQL `ConversationEntry.Message` for MIAW/Enhanced |
-| Put drafts in the composer with `setAgentInput` | Call `sendTextMessage` / auto-send |
-| Keep API keys in Named / External Credentials | Put `x-api-key` in LWC or client JS |
+| Keep Agent URL + API key in Named / External Credentials | Put `x-api-key` in LWC or App Builder string props |
+| Use separate NCs for Messaging vs Case (or per-instance override) | Assume one Agent URL for every surface |
+| Messaging: `setAgentInput`; Case: open Send Email with defaults | Auto-send |
 | Honor `messageLimit` from App Builder | Hardcode a default limit when unset |
-
-## `messageLimit`
-
-App Builder property **Past messages to include** (`@api messageLimit`):
-
-- **Null / empty / unset / non-positive** → entire conversation
-- **Positive N** → N most recent `ConversationEntry` messages (prompt still chronological)
-
-Passed to `ApologistAgentService.generateDraft(messagingSessionId, messageLimit)`.
-
-## Agent API contract
-
-- Base: Named Credential URL + `/api/v1/chat/completions`
-- Auth: `x-api-key` (agent must have `api` capability)
-- Prefer `response_format: { "type": "json" }` and read `choices[0].message.content`
-- Spec: `apg-agent` → `public/docs/openapi.yaml`
 
 ## Local commands
 
 ```bash
 sf project deploy start -o <org-alias>
 sf apex run test --tests ApologistAgentServiceTest --result-format human -o <org-alias>
+./scripts/install.sh --org <alias> --messaging-agent-url … --messaging-api-key … --case-agent-url … --case-api-key …
 ```
-
-Scratch definition: `config/project-scratch-def.json` (Messaging features).
 
 ## Workspace
 

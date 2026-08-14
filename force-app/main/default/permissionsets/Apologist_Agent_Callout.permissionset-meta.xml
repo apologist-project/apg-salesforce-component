@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">
-    <description>Allows callouts through the Apologist_Agent External Credential principal.</description>
+    <description>Allows callouts through Apologist Agent External Credential principals (legacy, Messaging, Case).</description>
     <hasActivationRequired>false</hasActivationRequired>
     <label>Apologist Agent Callout</label>
     <externalCredentialPrincipalAccesses>
         <enabled>true</enabled>
         <externalCredentialPrincipal>Apologist_Agent-ApologistAgentPrincipal</externalCredentialPrincipal>
+    </externalCredentialPrincipalAccesses>
+    <externalCredentialPrincipalAccesses>
+        <enabled>true</enabled>
+        <externalCredentialPrincipal>Apologist_Agent_Messaging-ApologistAgentPrincipal</externalCredentialPrincipal>
+    </externalCredentialPrincipalAccesses>
+    <externalCredentialPrincipalAccesses>
+        <enabled>true</enabled>
+        <externalCredentialPrincipal>Apologist_Agent_Case-ApologistAgentPrincipal</externalCredentialPrincipal>
     </externalCredentialPrincipalAccesses>
     <pageAccesses>
         <apexPage>ApologistApiSession</apexPage>

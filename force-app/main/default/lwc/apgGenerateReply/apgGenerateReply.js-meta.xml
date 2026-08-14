@@ -3,7 +3,7 @@
     <apiVersion>62.0</apiVersion>
     <isExposed>true</isExposed>
     <masterLabel>Apologist Generate Reply</masterLabel>
-    <description>Generates a draft Service Cloud reply via the Apologist Agent API and places it in the conversation composer for human review.</description>
+    <description>Generates a draft Service Cloud reply via the Apologist Agent API for Messaging Sessions or Case email, for human review before send.</description>
     <targets>
         <target>lightning__RecordPage</target>
     </targets>
@@ -11,6 +11,7 @@
         <targetConfig targets="lightning__RecordPage">
             <objects>
                 <object>MessagingSession</object>
+                <object>Case</object>
             </objects>
             <property
                 name="cardTitle"
@@ -51,7 +52,13 @@
                 name="messageLimit"
                 type="Integer"
                 label="Past messages to include"
-                description="Number of most recent messages to send to the Agent API. Leave blank to include the entire conversation."
+                description="Number of most recent messages (Messaging transcript or Case emails) to send to the Agent API. Leave blank to include the entire thread."
+            />
+            <property
+                name="namedCredential"
+                type="String"
+                label="Named Credential"
+                description="Named Credential API name for this instance's Agent (holds URL + API key). Leave blank for Apologist_Agent_Messaging on Messaging Session pages or Apologist_Agent_Case on Case pages. Example: Apologist_Agent_Case"
             />
         </targetConfig>
     </targetConfigs>

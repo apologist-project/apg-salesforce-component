@@ -26,17 +26,23 @@ public with sharing class ApologistConversationContext {
     }
   }
 
-  /** Transcript + Agent API identifiers for a Messaging Session draft request. */
+  /** Transcript + Agent API identifiers for a Messaging Session or Case draft request. */
   public class DraftContext {
     public List<Message> messages = new List<Message>();
-    /** End-user / MessagingEndUser Id when available; otherwise running Salesforce user. */
+    /** End-user / MessagingEndUser / Contact Id when available; otherwise running Salesforce user. */
     public String userId;
-    /** MessagingSession Id. */
+    /** MessagingSession Id or Case Id. */
     public String sessionId;
-    /** Conversation Id or ConversationIdentifier when available. */
+    /** Conversation Id/identifier, or Case Id for email cases. */
     public String conversationId;
-    /** MessagingSession.Status (Active, Waiting, Ended, ...). */
+    /** MessagingSession.Status (Active, Waiting, Ended, ...) or "Case". */
     public String sessionStatus;
+    /** "messaging" or "case". */
+    public String contextType;
+    /** Optional Case subject / description lines prepended to the prompt. */
+    public List<String> headerLines;
+    /** Suggested email Subject for Case Send Email (e.g. Re: …). */
+    public String emailSubject;
   }
 
   /**
@@ -65,13 +71,32 @@ public with sharing class ApologistConversationContext {
   }
 
   public static String buildPrompt(List<Message> chronologicalMessages) {
+    return buildPrompt(chronologicalMessages, null);
+  }
+
+  public static String buildPrompt(
+    List<Message> chronologicalMessages,
+    List<String> headerLines
+  ) {
     List<String> lines = new List<String>{
       'You are drafting a reply for a human service agent in Salesforce Service Cloud.',
       'Write a helpful, professional customer-facing reply based on the conversation below.',
       'Return only the reply text — no preamble, labels, or markdown fences.',
-      '',
-      'Conversation:'
+      ''
     };
+
+    if (headerLines != null) {
+      for (String headerLine : headerLines) {
+        if (String.isNotBlank(headerLine)) {
+          lines.add(headerLine);
+        }
+      }
+      if (!headerLines.isEmpty()) {
+        lines.add('');
+      }
+    }
+
+    lines.add('Conversation:');
 
     if (chronologicalMessages == null || chronologicalMessages.isEmpty()) {
       lines.add('(No prior messages.)');
@@ -86,6 +111,14 @@ public with sharing class ApologistConversationContext {
     lines.add('');
     lines.add('Draft the agent reply now.');
     return String.join(lines, '\n');
+  }
+
+  /** Builds the Agent prompt from a loaded DraftContext (includes Case headers when present). */
+  public static String buildPrompt(DraftContext context) {
+    if (context == null) {
+      return buildPrompt(new List<Message>(), null);
+    }
+    return buildPrompt(context.messages, context.headerLines);
   }
 
   @TestVisible
@@ -129,6 +162,7 @@ public with sharing class ApologistConversationContext {
     ];
 
     DraftContext context = new DraftContext();
+    context.contextType = 'messaging';
     context.sessionId = String.valueOf(session.Id);
     context.sessionStatus = session.Status;
     context.userId = session.MessagingEndUserId != null
@@ -170,6 +204,122 @@ public with sharing class ApologistConversationContext {
     }
 
     return context;
+  }
+
+  /**
+   * Loads Case email-thread context from related EmailMessage rows.
+   * messageLimit null / non-positive => entire thread; positive N => N most recent.
+   */
+  public static DraftContext loadCaseContext(Id caseId, Integer messageLimit) {
+    if (caseId == null) {
+      throw auraError('Case Id is required.');
+    }
+
+    Case c = [
+      SELECT Id, Subject, Description, ContactId, Contact.Email, SuppliedEmail
+      FROM Case
+      WHERE Id = :caseId
+      LIMIT 1
+    ];
+
+    DraftContext context = new DraftContext();
+    context.contextType = 'case';
+    context.sessionId = String.valueOf(c.Id);
+    context.conversationId = String.valueOf(c.Id);
+    context.sessionStatus = 'Case';
+    context.userId = c.ContactId != null
+      ? String.valueOf(c.ContactId)
+      : UserInfo.getUserId();
+    context.emailSubject = replySubject(c.Subject);
+
+    List<String> headers = new List<String>();
+    if (String.isNotBlank(c.Subject)) {
+      headers.add('Case subject: ' + c.Subject.trim());
+    }
+    if (String.isNotBlank(c.Description)) {
+      headers.add('Case description: ' + c.Description.trim());
+    }
+    context.headerLines = headers;
+
+    List<Message> chronological = loadMessagesFromEmail(c.Id);
+    context.messages = applyMessageLimit(chronological, messageLimit);
+
+    if (context.messages.isEmpty() && headers.isEmpty()) {
+      throw auraError(
+        'No email messages or Case description were found for this Case, so no draft context is available.'
+      );
+    }
+
+    return context;
+  }
+
+  /**
+   * EmailMessage rows for a Case, chronological (oldest first).
+   * Incoming → Customer; otherwise Agent. Prefers TextBody; falls back to stripped HtmlBody.
+   */
+  @TestVisible
+  static List<Message> loadMessagesFromEmail(Id caseId) {
+    List<Message> chronological = new List<Message>();
+    if (caseId == null) {
+      return chronological;
+    }
+
+    List<EmailMessage> emails = [
+      SELECT Incoming, TextBody, HtmlBody, MessageDate, Subject
+      FROM EmailMessage
+      WHERE ParentId = :caseId
+      ORDER BY MessageDate ASC NULLS LAST, CreatedDate ASC
+    ];
+
+    for (EmailMessage email : emails) {
+      String body = emailBodyText(email);
+      if (String.isBlank(body)) {
+        continue;
+      }
+      String actorType = email.Incoming == true ? 'Customer' : 'Agent';
+      chronological.add(new Message(actorType, body.trim(), email.MessageDate));
+    }
+    return chronological;
+  }
+
+  @TestVisible
+  static String emailBodyText(EmailMessage email) {
+    if (email == null) {
+      return null;
+    }
+    if (String.isNotBlank(email.TextBody)) {
+      return email.TextBody;
+    }
+    if (String.isNotBlank(email.HtmlBody)) {
+      return stripHtml(email.HtmlBody);
+    }
+    return null;
+  }
+
+  @TestVisible
+  static String stripHtml(String html) {
+    if (String.isBlank(html)) {
+      return html;
+    }
+    String text = html.replaceAll('(?i)<br\\s*/?>', '\n');
+    text = text.replaceAll('(?i)</p>', '\n');
+    text = text.replaceAll('(?i)<[^>]+>', ' ');
+    text = unescapeHtml(text);
+    text = text.replaceAll('[ \\t\\x0B\\f\\r]+', ' ');
+    text = text.replaceAll('\\n{3,}', '\n\n');
+    return text.trim();
+  }
+
+  @TestVisible
+  static String replySubject(String subject) {
+    if (String.isBlank(subject)) {
+      return 'Re: Your case';
+    }
+    String trimmed = subject.trim();
+    if (trimmed.toLowerCase().startsWith('re:')) {
+      return trimmed;
+    }
+    return 'Re: ' + trimmed;
   }
 
   /**
