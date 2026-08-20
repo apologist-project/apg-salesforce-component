@@ -97,6 +97,8 @@ Equivalent environment variables:
 | `APOLOGIST_AGENT_URL` / `APOLOGIST_API_KEY` | `--agent-url` / `--api-key` (scoped by `--for`) |
 | `APOLOGIST_MESSAGING_AGENT_URL` / `APOLOGIST_MESSAGING_API_KEY` | `--messaging-agent-url` / `--messaging-api-key` |
 | `APOLOGIST_CASE_AGENT_URL` / `APOLOGIST_CASE_API_KEY` | `--case-agent-url` / `--case-api-key` |
+| `APOLOGIST_CASE_PAGE` | `--case-page` (FlexiPage DeveloperName) |
+| `APOLOGIST_ACTIVATE_CASE_PAGE=1` | `--activate-case-page` |
 | `SF_API_VERSION` | *(default `67.0`)* |
 
 ### Script options
@@ -106,10 +108,14 @@ Equivalent environment variables:
 
 Org / deploy:
   --org, -o
-  --skip-deploy, --skip-permset, --full-project, --dry-run, --assign-user
+  --skip-deploy, --skip-permset, --skip-case-page, --full-project, --dry-run, --assign-user
+  --activate-case-page            Set org default Case View (opt-in)
+  --case-page <DeveloperName>     Activate that Lightning Case page (implies activate;
+                                  default name: Apologist_Case_Page)
 
 Context:
   --for messaging|case|both   Scope --agent-url/--api-key (aliases: chat, email, all)
+                              case/both also wires Case Quick Action onto layouts/pages
 
 Credentials:
   --agent-url / --api-key                         Agent pair (used with --for)
@@ -125,6 +131,18 @@ Examples:
   --agent-url https://chat-agent.example.com \
   --api-key "$CHAT_KEY" \
   --dry-run
+
+# Case install + activate packaged Apologist_Case_Page as org default
+./scripts/install.sh --org apg-sf --for case \
+  --agent-url https://email-agent.example.com \
+  --api-key "$EMAIL_KEY" \
+  --activate-case-page
+
+# Activate a different Lightning Case page already in the org / package
+./scripts/install.sh --org apg-sf --for case \
+  --agent-url https://email-agent.example.com \
+  --api-key "$EMAIL_KEY" \
+  --case-page Case_Record_Page
 
 # Rotate Case agent only
 ./scripts/install.sh --org apg-sf --for case \
@@ -151,12 +169,18 @@ Add the component on each surface you need:
 
 **Case (email)**
 
-1. Open a **Case** record → **Edit Page** (or Setup → Object Manager → Case → Lightning Record Pages).
-2. Add **Apologist Generate Reply**.
-3. Set [configurable parameters](#configurable-parameters) as needed.
-4. **Save** and **Activate**.
-5. Open a Case with related emails, click **Generate Draft Reply** — the draft appears in the widget and **Send Email** opens with the body pre-filled.
-6. Ensure **HtmlBody** / **Subject** are not read-only on the Case **Send Email** quick action layout (otherwise defaults may not apply).
+With `--for case` or `--for both`, `scripts/install.sh` deploys the Case Quick Action and layout/page wiring. Org-default Case View activation is **opt-in**:
+
+- `--activate-case-page` → activate packaged `Apologist_Case_Page` (standard Lightning template)
+- `--case-page <DeveloperName>` → activate that FlexiPage instead (e.g. console `Case_Record_Page`)
+
+Without those flags, add **Generate Draft Reply** / **Send Email** on your existing Case Lightning page in App Builder (Dynamic Actions), or activate a packaged page manually.
+
+Notes:
+- LWC actions **cannot** be dragged onto the classic Case layout Quick Action / feed list (Salesforce blocks that).
+- Opt out of page wiring with `--skip-case-page` if you only want credentials.
+- Optional: also add the **Apologist Generate Reply** record-page widget via App Builder for an on-page draft preview.
+- Ensure **HtmlBody** / **Subject** are not read-only on the Case **Send Email** action layout.
 
 ---
 
@@ -177,6 +201,8 @@ Deploy the component stack:
 ```bash
 sf project deploy start -o apg-sf \
   --source-dir force-app/main/default/lwc/apgGenerateReply \
+  --source-dir force-app/main/default/lwc/apgGenerateReplyAction \
+  --source-dir force-app/main/default/quickActions \
   --source-dir force-app/main/default/classes \
   --source-dir force-app/main/default/namedCredentials \
   --source-dir force-app/main/default/externalCredentials \
@@ -264,10 +290,11 @@ Same steps as [After the script](#after-the-script).
 
 **Case email**
 
-1. Open a Case that has related **EmailMessage** rows (or at least a Description).
-2. Click **Generate Draft Reply**.
-3. Confirm the draft appears in the widget and Send Email opens with the body pre-filled.
-4. Review and send manually — this component does not send.
+1. Add **Generate Draft Reply** to the Case page layout / Lightning actions (see Case Quick Action above).
+2. Open a Case that has related **EmailMessage** rows (or at least a Description).
+3. Click **Generate Draft Reply**.
+4. Confirm Send Email opens with the body pre-filled (or use the page widget for an on-page draft preview).
+5. Review and send manually — this component does not send.
 
 ---
 
@@ -372,6 +399,8 @@ If generation succeeds but the composer cannot be updated/opened, the draft stil
 ```text
 force-app/main/default/
   lwc/apgGenerateReply/           # Record-page UI + App Builder properties
+  lwc/apgGenerateReplyAction/     # Headless Case Quick Action
+  quickActions/Case.Apologist_Generate_Draft_Reply*
   classes/ApologistAgentService*  # Named Credential callout + tests
   classes/ApologistConversationContext*
   namedCredentials/Apologist_Agent*
@@ -403,6 +432,7 @@ sf apex run test --tests ApologistAgentServiceTest --result-format human -o apg-
 | `INVALID_SESSION_ID` on Connect | Lightning sessions are not API-enabled; the component uses VF page `ApologistApiSession` for a REST-capable token — ensure that page is deployed and the **Apologist Agent Callout** permission set is assigned |
 | Draft in component but not in reply box | Session not **Active**; Enhanced Conversation missing/closed; not in a supported console |
 | Case draft OK but email fields empty | HtmlBody/Subject read-only on Send Email action layout; or Case.SendEmail missing — try adding the Email action |
+| Quick Action missing on Case | Add **Generate Draft Reply** to the Case page layout (Salesforce Mobile and Lightning Experience Actions) |
 | Case “no context” error | No related EmailMessage rows and empty Case Description |
 | Component missing from Case App Builder | Redeploy LWC meta (Case must be listed in targets); hard-refresh App Builder |
 | Icon missing | `cardIcon` not valid `category:name` SLDS icon |

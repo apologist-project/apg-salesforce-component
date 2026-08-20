@@ -1,49 +1,26 @@
 import { LightningElement, api } from 'lwc';
 import { NavigationMixin } from 'lightning/navigation';
 import { encodeDefaultFieldValues } from 'lightning/pageReferenceUtils';
-import { setAgentInput } from 'lightning/conversationToolkitApi';
 import generateDraftForRecord from '@salesforce/apex/ApologistAgentService.generateDraftForRecord';
 
-const DEFAULT_TITLE = 'Apologist Agent';
+const DEFAULT_TITLE = 'Apologist Generate Reply';
 const DEFAULT_DESCRIPTION = 'Generate a draft reply from the Apologist Agent API.';
 const DEFAULT_ICON = 'standard:sparkles';
 const DEFAULT_BUTTON_COLOR = '#7137ff';
 const DEFAULT_ICON_BACKGROUND_COLOR = '#7137ff';
 
-export default class ApgGenerateReply extends NavigationMixin(LightningElement) {
-  /** Messaging Session Id (set by the record page). */
+/**
+ * Case record-page card. Intentionally does not import lightning/conversationToolkitApi
+ * (Messaging-only) — that static import prevents the LWC from loading on Case pages.
+ */
+export default class ApgGenerateCaseReply extends NavigationMixin(LightningElement) {
   @api recordId;
-
-  /**
-   * Past messages to include when building the Agent API prompt.
-   * Null / empty / unset = entire conversation.
-   * Positive integer N = N most recent messages.
-   */
   @api messageLimit;
-
-  /** Card title shown in the component header. */
   @api cardTitle;
-
-  /** Short description under the title. */
   @api cardDescription;
-
-  /**
-   * SLDS icon name for lightning-card, e.g. utility:einstein or standard:bot.
-   * See https://www.lightningdesignsystem.com/icons/
-   */
   @api cardIcon;
-
-  /** Hex (or CSS) color for the Generate Draft Reply brand button. */
   @api buttonColor;
-
-  /** Hex (or CSS) color for the card header icon background. */
   @api iconBackgroundColor;
-
-  /**
-   * Named Credential API name for this widget instance's Agent (URL + API key).
-   * Leave blank to use Apologist_Agent_Messaging. Create additional Named
-   * Credentials in Setup to point different page placements at different Agents.
-   */
   @api namedCredential;
 
   isBusy = false;
@@ -70,10 +47,6 @@ export default class ApgGenerateReply extends NavigationMixin(LightningElement) 
     return this.iconBackgroundColor || DEFAULT_ICON_BACKGROUND_COLOR;
   }
 
-  /**
-   * SLDS styling hooks for lightning-button variant="brand".
-   * Custom properties inherit into the base component shadow tree.
-   */
   get buttonColorStyle() {
     const color = this.resolvedButtonColor;
     return [
@@ -86,7 +59,6 @@ export default class ApgGenerateReply extends NavigationMixin(LightningElement) 
     ].join('; ');
   }
 
-  /** SLDS styling hooks for the card header lightning-icon background. */
   get iconBackgroundStyle() {
     const color = this.resolvedIconBackgroundColor;
     return [
@@ -99,9 +71,6 @@ export default class ApgGenerateReply extends NavigationMixin(LightningElement) 
     return this.isBusy ? 'Generating…' : 'Generate Draft Reply';
   }
 
-  /**
-   * Normalize App Builder / @api values: blank means entire conversation (null).
-   */
   resolvedMessageLimit() {
     const value = this.messageLimit;
     if (value === undefined || value === null || value === '') {
@@ -150,26 +119,48 @@ export default class ApgGenerateReply extends NavigationMixin(LightningElement) 
     this.draftText = draft;
 
     try {
-      if (result.canFillComposer !== false) {
-        // Populate the Enhanced Conversation composer; do not send.
-        await setAgentInput(this.recordId, { text: draft }, false);
-      }
+      await this.openCaseEmailComposer(draft, result.emailSubject);
     } catch (error) {
-      // Draft remains visible for copy/paste.
       // eslint-disable-next-line no-console
-      console.error('apgGenerateReply composer step', error);
+      console.error('apgGenerateCaseReply composer step', error);
       this.errorMessage =
-        'Draft ready below, but the composer could not be filled: ' +
+        'Draft ready below, but Send Email could not be opened: ' +
         this.reduceError(error);
     } finally {
       this.isBusy = false;
     }
   }
 
+  async openCaseEmailComposer(draft, emailSubject) {
+    const defaults = { HtmlBody: draft };
+    if (emailSubject) {
+      defaults.Subject = emailSubject;
+    }
+
+    const state = {
+      recordId: this.recordId,
+      defaultFieldValues: encodeDefaultFieldValues(defaults)
+    };
+
+    try {
+      await this[NavigationMixin.Navigate]({
+        type: 'standard__quickAction',
+        attributes: { apiName: 'Case.SendEmail' },
+        state
+      });
+    } catch (caseActionError) {
+      await this[NavigationMixin.Navigate]({
+        type: 'standard__quickAction',
+        attributes: { apiName: 'Global.SendEmail' },
+        state
+      });
+    }
+  }
+
   fail(message, error) {
     this.errorMessage = message;
     // eslint-disable-next-line no-console
-    console.error('apgGenerateReply', message, error || '');
+    console.error('apgGenerateCaseReply', message, error || '');
   }
 
   reduceError(error) {
@@ -179,43 +170,15 @@ export default class ApgGenerateReply extends NavigationMixin(LightningElement) 
     if (typeof error === 'string') {
       return error;
     }
-
-    const parts = [];
-    if (error.status) {
-      parts.push('status=' + error.status);
-    }
-    if (error.statusText) {
-      parts.push(error.statusText);
-    }
     if (Array.isArray(error.body)) {
-      parts.push(error.body.map((e) => e && e.message).filter(Boolean).join(', '));
-    } else if (error.body && typeof error.body === 'object') {
-      if (error.body.message) {
-        parts.push(error.body.message);
-      }
-      if (error.body.exceptionType) {
-        parts.push(error.body.exceptionType);
-      }
-      if (Array.isArray(error.body.pageErrors)) {
-        parts.push(
-          error.body.pageErrors.map((e) => e && e.message).filter(Boolean).join(', ')
-        );
-      }
-      if (error.body.output && Array.isArray(error.body.output.errors)) {
-        parts.push(
-          error.body.output.errors.map((e) => e && e.message).filter(Boolean).join(', ')
-        );
-      }
+      return error.body.map((e) => e && e.message).filter(Boolean).join(', ') || 'Unknown error';
+    }
+    if (error.body && error.body.message) {
+      return error.body.message;
     }
     if (error.message && error.message !== 'Unknown error') {
-      parts.push(error.message);
+      return error.message;
     }
-
-    const detail = parts.filter(Boolean).join(' | ');
-    if (detail) {
-      return detail;
-    }
-
     try {
       return JSON.stringify(error);
     } catch (e) {

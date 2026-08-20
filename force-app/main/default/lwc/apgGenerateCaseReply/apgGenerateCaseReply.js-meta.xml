@@ -2,22 +2,22 @@
 <LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">
     <apiVersion>62.0</apiVersion>
     <isExposed>true</isExposed>
-    <masterLabel>Apologist Generate Reply</masterLabel>
-    <description>Generates a draft Service Cloud reply via the Apologist Agent API for Messaging Sessions or Case email, for human review before send.</description>
+    <masterLabel>Apologist Generate Reply (Case)</masterLabel>
+    <description>Generates a draft Case email reply via the Apologist Agent API and opens Send Email for review. Does not use Messaging conversation APIs.</description>
     <targets>
         <target>lightning__RecordPage</target>
     </targets>
     <targetConfigs>
         <targetConfig targets="lightning__RecordPage">
             <objects>
-                <object>MessagingSession</object>
+                <object>Case</object>
             </objects>
             <property
                 name="cardTitle"
                 type="String"
                 label="Title"
                 description="Card title shown in the component header."
-                default="Apologist Agent"
+                default="Apologist Generate Reply"
             />
             <property
                 name="cardDescription"
@@ -30,7 +30,7 @@
                 name="cardIcon"
                 type="String"
                 label="Icon name"
-                description="SLDS icon in category:name format (e.g. standard:sparkles, utility:chat). See https://www.lightningdesignsystem.com/icons/"
+                description="SLDS icon in category:name format (e.g. standard:sparkles, utility:chat)."
                 default="standard:sparkles"
             />
             <property
@@ -51,13 +51,13 @@
                 name="messageLimit"
                 type="Integer"
                 label="Past messages to include"
-                description="Number of most recent messages (Messaging transcript or Case emails) to send to the Agent API. Leave blank to include the entire thread."
+                description="Number of most recent Case emails to send to the Agent API. Leave blank to include the entire thread."
             />
             <property
                 name="namedCredential"
                 type="String"
                 label="Named Credential"
-                description="Named Credential API name for this instance's Agent (holds URL + API key). Leave blank for Apologist_Agent_Messaging on Messaging Session pages or Apologist_Agent_Case on Case pages. Example: Apologist_Agent_Case"
+                description="Named Credential API name for this instance's Agent. Leave blank for Apologist_Agent_Case."
             />
         </targetConfig>
     </targetConfigs>
