@@ -17,6 +17,10 @@ public with sharing class ApologistAgentService {
   private static final Pattern CREDENTIAL_NAME_PATTERN = Pattern.compile(
     '^[A-Za-z][A-Za-z0-9_]{0,79}$'
   );
+  /** Per-instance Agents must use this prefix (e.g. Apologist_Agent_Ligonier). */
+  private static final Pattern CREDENTIAL_ALLOWLIST_PATTERN = Pattern.compile(
+    '^Apologist_Agent(_[A-Za-z0-9_]+)?$'
+  );
 
   public class DraftResult {
     @AuraEnabled
@@ -130,6 +134,11 @@ public with sharing class ApologistAgentService {
         'Invalid Named Credential name. Use an API name like Apologist_Agent_Messaging.'
       );
     }
+    if (!CREDENTIAL_ALLOWLIST_PATTERN.matcher(name).matches()) {
+      throw auraError(
+        'Named Credential must be Apologist_Agent, Apologist_Agent_Messaging, Apologist_Agent_Case, or Apologist_Agent_*.'
+      );
+    }
     return name;
   }
 
@@ -184,12 +193,63 @@ public with sharing class ApologistAgentService {
 
     HttpResponse res = new Http().send(req);
     if (res.getStatusCode() < 200 || res.getStatusCode() >= 300) {
-      throw auraError(
-        'Agent API error ' + res.getStatusCode() + ': ' + truncate(res.getBody(), 500)
-      );
+      throw auraError(safeHttpErrorMessage('Agent API', res.getStatusCode(), res.getBody()));
     }
 
     return extractContent(res.getBody());
+  }
+
+  /**
+   * Status-focused Aura message. Avoids leaking HTML / large response bodies to the UI.
+   * When the body is compact JSON with error/message, include a short sanitized snippet.
+   */
+  public static String safeHttpErrorMessage(String source, Integer statusCode, String body) {
+    String message = source + ' error ' + String.valueOf(statusCode);
+    String detail = safeJsonErrorDetail(body);
+    if (String.isNotBlank(detail)) {
+      message += ': ' + detail;
+    }
+    return message;
+  }
+
+  @TestVisible
+  static String safeJsonErrorDetail(String body) {
+    if (String.isBlank(body)) {
+      return null;
+    }
+    String trimmed = body.trim();
+    if (trimmed.length() > 400 || trimmed.startsWith('<') || !trimmed.startsWith('{')) {
+      return null;
+    }
+    try {
+      Object parsed = JSON.deserializeUntyped(trimmed);
+      if (!(parsed instanceof Map<String, Object>)) {
+        return null;
+      }
+      Map<String, Object> root = (Map<String, Object>) parsed;
+      Object raw = root.get('error');
+      if (raw == null) {
+        raw = root.get('message');
+      }
+      if (raw instanceof Map<String, Object>) {
+        Map<String, Object> errMap = (Map<String, Object>) raw;
+        Object nested = errMap.get('message');
+        if (nested == null) {
+          nested = errMap.get('code');
+        }
+        raw = nested;
+      }
+      if (raw == null) {
+        return null;
+      }
+      String detail = String.valueOf(raw).trim();
+      if (String.isBlank(detail) || detail.contains('<') || detail.length() > 120) {
+        return null;
+      }
+      return detail;
+    } catch (Exception ignore) {
+      return null;
+    }
   }
 
   @TestVisible
@@ -269,12 +329,5 @@ public with sharing class ApologistAgentService {
     AuraHandledException e = new AuraHandledException(message);
     e.setMessage(message);
     return e;
-  }
-
-  private static String truncate(String value, Integer maxLen) {
-    if (value == null) {
-      return '';
-    }
-    return value.length() <= maxLen ? value : value.substring(0, maxLen);
   }
 }

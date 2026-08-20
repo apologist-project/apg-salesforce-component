@@ -57,7 +57,7 @@
                 name="namedCredential"
                 type="String"
                 label="Named Credential"
-                description="Named Credential API name for this instance's Agent (holds URL + API key). Leave blank for Apologist_Agent_Messaging on Messaging Session pages or Apologist_Agent_Case on Case pages. Example: Apologist_Agent_Case"
+                description="Named Credential API name for this instance's Agent (URL + API key). Must be Apologist_Agent, Apologist_Agent_Messaging, or Apologist_Agent_*. Leave blank for Apologist_Agent_Messaging. Example: Apologist_Agent_Ligonier"
             />
         </targetConfig>
     </targetConfigs>

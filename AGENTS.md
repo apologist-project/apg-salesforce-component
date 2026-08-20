@@ -24,7 +24,7 @@ Salesforce DX project: Lightning Web Component + Apex that drafts Service Cloud 
 |----|--------|
 | `POST /api/v1/chat/completions` with `stream: false` | Embed `/beacon/agent*.js` for this draft flow |
 | Keep Agent URL + API key in Named / External Credentials | Put `x-api-key` in LWC or App Builder string props |
-| Use separate NCs for Messaging vs Case (or per-instance override) | Assume one Agent URL for every surface |
+| Use separate NCs for Messaging vs Case (or `Apologist_Agent_*` override) | Point App Builder at a non-Apologist Named Credential |
 | Messaging: `setAgentInput`; Case: open Send Email with defaults | Auto-send |
 | Honor `messageLimit` from App Builder | Hardcode a default limit when unset |
 

@@ -56,7 +56,7 @@ export default class ApgGenerateReplyAction extends NavigationMixin(LightningEle
         'warning'
       );
       // eslint-disable-next-line no-console
-      console.error('apgGenerateReplyAction composer', draft, error);
+      console.error('apgGenerateReplyAction composer', error);
     }
   }
 

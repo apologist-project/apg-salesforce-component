@@ -33,6 +33,15 @@ private class ApologistAgentServiceTest {
     }
   }
 
+  private class HtmlErrorMock implements HttpCalloutMock {
+    public HTTPResponse respond(HTTPRequest req) {
+      HttpResponse res = new HttpResponse();
+      res.setStatusCode(503);
+      res.setBody('<html><head><title>ERR_DNS_FAIL</title></head><body>Unable to resolve DNS</body></html>');
+      return res;
+    }
+  }
+
   @IsTest
   static void applyMessageLimit_nullMeansEntireConversation() {
     List<ApologistConversationContext.Message> all = sampleMessages(5);
@@ -149,9 +158,48 @@ private class ApologistAgentServiceTest {
       Test.stopTest();
     } catch (AuraHandledException e) {
       threw = true;
-      System.assert(e.getMessage().contains('401') || e.getMessage() != null);
+      System.assert(
+        e.getMessage().contains('401'),
+        'Expected status in message: ' + e.getMessage()
+      );
+      System.assert(
+        e.getMessage().contains('unauthorized'),
+        'Expected safe JSON error detail: ' + e.getMessage()
+      );
     }
     System.assert(threw, 'Expected AuraHandledException for HTTP 401');
+  }
+
+  @IsTest
+  static void requestCompletion_omitsHtmlErrorBodies() {
+    Test.setMock(HttpCalloutMock.class, new HtmlErrorMock());
+    Boolean threw = false;
+    try {
+      Test.startTest();
+      ApologistAgentService.requestCompletion(sampleContext(1));
+      Test.stopTest();
+    } catch (AuraHandledException e) {
+      threw = true;
+      System.assert(
+        e.getMessage().contains('503'),
+        'Expected status in message: ' + e.getMessage()
+      );
+      System.assert(
+        !e.getMessage().contains('ERR_DNS_FAIL') && !e.getMessage().contains('<html'),
+        'HTML body must not surface: ' + e.getMessage()
+      );
+    }
+    System.assert(threw, 'Expected AuraHandledException for HTTP 503');
+  }
+
+  @IsTest
+  static void safeHttpErrorMessage_statusOnlyForHtml() {
+    String message = ApologistAgentService.safeHttpErrorMessage(
+      'Agent API',
+      503,
+      '<html>boom</html>'
+    );
+    System.assertEquals('Agent API error 503', message);
   }
 
   @IsTest
@@ -406,6 +454,40 @@ private class ApologistAgentServiceTest {
       threw = true;
     }
     System.assert(threw, 'Expected invalid Named Credential name error');
+  }
+
+  @IsTest
+  static void resolveNamedCredential_allowsApologistPrefixOverride() {
+    System.assertEquals(
+      'Apologist_Agent_Ligonier',
+      ApologistAgentService.resolveNamedCredential('case', 'Apologist_Agent_Ligonier')
+    );
+  }
+
+  @IsTest
+  static void resolveNamedCredential_rejectsNonApologistName() {
+    Boolean threw = false;
+    try {
+      ApologistAgentService.resolveNamedCredential('messaging', 'Evil_Credential');
+    } catch (AuraHandledException e) {
+      threw = true;
+      System.assert(
+        e.getMessage().contains('Apologist_Agent'),
+        e.getMessage()
+      );
+    }
+    System.assert(threw, 'Expected non-Apologist Named Credential to be rejected');
+  }
+
+  @IsTest
+  static void validateNamedCredentialName_rejectsCalloutPrefix() {
+    Boolean threw = false;
+    try {
+      ApologistAgentService.validateNamedCredentialName('callout:x');
+    } catch (AuraHandledException e) {
+      threw = true;
+    }
+    System.assert(threw, 'Expected callout: prefix to be rejected');
   }
 
   @IsTest

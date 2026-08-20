@@ -158,6 +158,7 @@ public with sharing class ApologistConversationContext {
         Conversation.ConversationIdentifier
       FROM MessagingSession
       WHERE Id = :messagingSessionId
+      WITH USER_MODE
       LIMIT 1
     ];
 
@@ -219,6 +220,7 @@ public with sharing class ApologistConversationContext {
       SELECT Id, Subject, Description, ContactId, Contact.Email, SuppliedEmail
       FROM Case
       WHERE Id = :caseId
+      WITH USER_MODE
       LIMIT 1
     ];
 
@@ -268,6 +270,7 @@ public with sharing class ApologistConversationContext {
       SELECT Incoming, TextBody, HtmlBody, MessageDate, Subject
       FROM EmailMessage
       WHERE ParentId = :caseId
+      WITH USER_MODE
       ORDER BY MessageDate ASC NULLS LAST, CreatedDate ASC
     ];
 
@@ -360,10 +363,11 @@ public with sharing class ApologistConversationContext {
 
     if (res.getStatusCode() < 200 || res.getStatusCode() >= 300) {
       throw auraError(
-        'Connect conversation entries error ' +
-          res.getStatusCode() +
-          ': ' +
-          truncate(res.getBody(), 400)
+        ApologistAgentService.safeHttpErrorMessage(
+          'Connect conversation entries',
+          res.getStatusCode(),
+          res.getBody()
+        )
       );
     }
 
@@ -454,6 +458,7 @@ public with sharing class ApologistConversationContext {
       SELECT ActorType, Message, EntryTime
       FROM ConversationEntry
       WHERE ConversationId = :conversationId
+      WITH USER_MODE
       ORDER BY EntryTime DESC
     ];
 
@@ -545,12 +550,5 @@ public with sharing class ApologistConversationContext {
     AuraHandledException e = new AuraHandledException(message);
     e.setMessage(message);
     return e;
-  }
-
-  private static String truncate(String value, Integer maxLen) {
-    if (value == null) {
-      return '';
-    }
-    return value.length() <= maxLen ? value : value.substring(0, maxLen);
   }
 }

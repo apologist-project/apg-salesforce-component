@@ -57,7 +57,7 @@
                 name="namedCredential"
                 type="String"
                 label="Named Credential"
-                description="Named Credential API name for this instance's Agent. Leave blank for Apologist_Agent_Case."
+                description="Named Credential API name for this instance's Agent. Must be Apologist_Agent, Apologist_Agent_Case, or Apologist_Agent_*. Leave blank for Apologist_Agent_Case."
             />
         </targetConfig>
     </targetConfigs>
