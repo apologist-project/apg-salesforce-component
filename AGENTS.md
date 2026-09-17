@@ -8,8 +8,10 @@ Salesforce DX project: Lightning Web Component + Apex that drafts Service Cloud 
 - LWC: `apgGenerateReply` on **MessagingSession**; `apgGenerateCaseReply` on **Case** record pages; `apgGenerateReplyAction` headless **Case** Quick Action
   - Case pages must use `apgGenerateCaseReply` (not `apgGenerateReply`) — the Messaging LWC statically imports `conversationToolkitApi`, which prevents it from loading on Case
 - Apex: `ApologistAgentService.generateDraftForRecord(recordId, messageLimit, namedCredential)`
+  - Do **not** statically reference `MessagingSession` / `ConversationEntry` — Case-only orgs lack those types; use describe + dynamic SOQL
 - Case Quick Action metadata: `Case.Apologist_Generate_Draft_Reply` (add to Case page layout actions)
 - Case View activation (opt-in): `scripts/install.sh --activate-case-page` or `--case-page <FlexiPageDeveloperName>`
+- `--for case` skips Messaging Session LWC `apgGenerateReply` (targets `MessagingSession`); do not `--full-project` on Case-only orgs
 - Auth (API key per Agent):
   - Default Messaging: Named Credential `Apologist_Agent_Messaging`
   - Default Case: Named Credential `Apologist_Agent_Case`
@@ -31,8 +33,8 @@ Salesforce DX project: Lightning Web Component + Apex that drafts Service Cloud 
 ## Local commands
 
 ```bash
-sf project deploy start -o <org-alias>
 sf apex run test --tests ApologistAgentServiceTest --result-format human -o <org-alias>
+./scripts/install.sh --org <alias> --for case --agent-url … --api-key …
 ./scripts/install.sh --org <alias> --messaging-agent-url … --messaging-api-key … --case-agent-url … --case-api-key …
 ```
 

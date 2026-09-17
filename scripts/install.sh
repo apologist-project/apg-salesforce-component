@@ -10,6 +10,9 @@
 #   - Messaging / Omni-Channel org setup
 #   - Placing the LWC on Lightning pages (App Builder)
 #
+# Case-only orgs (--for case) do not need Digital Engagement / Messaging Session.
+# Apex resolves those types dynamically so the same classes compile without them.
+#
 # Usage (pick a context with --for + shared agent):
 #   ./scripts/install.sh --org apg-sf --for messaging \
 #     --agent-url https://chat-agent.example.com \
@@ -118,6 +121,10 @@ deploys the Case Quick Action and wires it onto Case layouts + Lightning pages
 (highlights panel). Org-default Case page activation is opt-in via --activate-case-page
 or --case-page. LWC actions cannot be dragged onto the classic Quick Action list.
 
+--for case skips the Messaging Session LWC (apgGenerateReply) and the
+ApologistApiSession Visualforce page so orgs without Digital Engagement /
+Messaging can deploy. Do not use --full-project on those orgs.
+
 Per-instance Agents:
   Create additional Named Credentials in Setup, then set the component's
   App Builder property "Named Credential" to that API name.
@@ -159,6 +166,22 @@ validate_case_page_name() {
   local name="$1"
   [[ "$name" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]] || \
     die "Invalid Case Lightning page API name: $name (use the FlexiPage DeveloperName)"
+}
+
+# Writes a permission set without VF page access (Messaging Connect session bridge).
+write_case_only_permset() {
+  local dest="$1"
+  mkdir -p "$dest/permissionsets"
+  python3 - "$ROOT/force-app/main/default/permissionsets/Apologist_Agent_Callout.permissionset-meta.xml" \
+    "$dest/permissionsets/Apologist_Agent_Callout.permissionset-meta.xml" <<'PY'
+from pathlib import Path
+import re
+import sys
+src, dest = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+text = re.sub(r"\n    <pageAccesses>.*?</pageAccesses>", "", text, count=1, flags=re.S)
+dest.write_text(text)
+PY
 }
 
 # Writes Case View actionOverrides for Desktop + Phone targeting the given FlexiPage.
@@ -274,8 +297,15 @@ if [[ -z "$MESSAGING_AGENT_URL" && -z "$CASE_AGENT_URL" ]]; then
   die "Pass --for messaging|case|both with --agent-url/--api-key, and/or explicit messaging/case credential pairs"
 fi
 
+# Orgs without Digital Engagement have no MessagingSession object; skip that LWC.
+INSTALL_CASE_ONLY=0
+if [[ "$INSTALL_FOR" == "case" || ( -n "$CASE_AGENT_URL" && -z "$MESSAGING_AGENT_URL" ) ]]; then
+  INSTALL_CASE_ONLY=1
+fi
+
 log "Target org: $ORG"
 [[ -n "$INSTALL_FOR" ]] && log "Install for:  $INSTALL_FOR"
+[[ "$INSTALL_CASE_ONLY" -eq 1 ]] && log "Case-only:    yes (skip Messaging Session LWC)"
 [[ -n "$MESSAGING_AGENT_URL" ]] && log "Messaging agent: $MESSAGING_AGENT_URL"
 [[ -n "$CASE_AGENT_URL" ]] && log "Case agent:      $CASE_AGENT_URL"
 
@@ -314,6 +344,9 @@ deploy_stack() {
   fi
 
   if [[ "$FULL_PROJECT" -eq 1 ]]; then
+    if [[ "$INSTALL_CASE_ONLY" -eq 1 ]]; then
+      die "--full-project deploys Messaging Session metadata; omit it for Case-only orgs (or enable Digital Engagement first)"
+    fi
     log "Deploying full force-app"
     if [[ "$DRY_RUN" -eq 1 ]]; then
       echo "sf project deploy start -o $ORG --source-dir force-app"
@@ -324,14 +357,26 @@ deploy_stack() {
   fi
 
   local -a source_dirs=(
-    force-app/main/default/lwc/apgGenerateReply
     force-app/main/default/lwc/apgGenerateCaseReply
     force-app/main/default/classes
     force-app/main/default/namedCredentials
     force-app/main/default/externalCredentials
-    force-app/main/default/permissionsets
     force-app/main/default/remoteSiteSettings
   )
+  local case_permset_dir=""
+
+  if [[ "$INSTALL_CASE_ONLY" -eq 0 ]]; then
+    source_dirs+=(
+      force-app/main/default/lwc/apgGenerateReply
+      force-app/main/default/pages
+      force-app/main/default/permissionsets
+    )
+  else
+    log "Skipping Messaging Session LWC apgGenerateReply and ApologistApiSession page (Case-only)"
+    case_permset_dir="$(mktemp -d)"
+    write_case_only_permset "$case_permset_dir"
+    source_dirs+=("$case_permset_dir/permissionsets")
+  fi
 
   if [[ "$INCLUDE_CASE_PAGE" -eq 1 ]]; then
     log "Deploying component stack + Case email Quick Action / page wiring"
@@ -339,8 +384,16 @@ deploy_stack() {
       force-app/main/default/lwc/apgGenerateReplyAction
       force-app/main/default/quickActions
       force-app/main/default/layouts
-      force-app/main/default/flexipages
     )
+    if [[ "$INSTALL_CASE_ONLY" -eq 1 ]]; then
+      source_dirs+=(
+        force-app/main/default/flexipages/Apologist_Case_Page.flexipage-meta.xml
+        force-app/main/default/flexipages/Case_Record_Page.flexipage-meta.xml
+        force-app/main/default/flexipages/Case_Record_Page1.flexipage-meta.xml
+      )
+    else
+      source_dirs+=(force-app/main/default/flexipages)
+    fi
     if [[ "$ACTIVATE_CASE_PAGE" -eq 1 ]]; then
       if [[ "$DRY_RUN" -eq 0 ]]; then
         write_case_view_override "$CASE_PAGE"
@@ -358,6 +411,7 @@ deploy_stack() {
       printf ' --source-dir %s' "$d"
     done
     printf '\n'
+    [[ -n "$case_permset_dir" ]] && rm -rf "$case_permset_dir"
     return
   fi
 
@@ -365,7 +419,10 @@ deploy_stack() {
   for d in "${source_dirs[@]}"; do
     deploy_args+=(--source-dir "$d")
   done
-  (cd "$ROOT" && sf project deploy start "${deploy_args[@]}")
+  local deploy_status=0
+  (cd "$ROOT" && sf project deploy start "${deploy_args[@]}") || deploy_status=$?
+  [[ -n "$case_permset_dir" ]] && rm -rf "$case_permset_dir"
+  return "$deploy_status"
 }
 
 # When credentials-only (--skip-deploy) but installing for case, still wire the Case page
@@ -384,8 +441,16 @@ deploy_case_page_wiring() {
     force-app/main/default/lwc/apgGenerateReplyAction
     force-app/main/default/quickActions
     force-app/main/default/layouts
-    force-app/main/default/flexipages
   )
+  if [[ "$INSTALL_CASE_ONLY" -eq 1 ]]; then
+    source_dirs+=(
+      force-app/main/default/flexipages/Apologist_Case_Page.flexipage-meta.xml
+      force-app/main/default/flexipages/Case_Record_Page.flexipage-meta.xml
+      force-app/main/default/flexipages/Case_Record_Page1.flexipage-meta.xml
+    )
+  else
+    source_dirs+=(force-app/main/default/flexipages)
+  fi
   if [[ "$ACTIVATE_CASE_PAGE" -eq 1 ]]; then
     if [[ "$DRY_RUN" -eq 0 ]]; then
       write_case_view_override "$CASE_PAGE"

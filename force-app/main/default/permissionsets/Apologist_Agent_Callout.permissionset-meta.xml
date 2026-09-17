@@ -27,8 +27,4 @@
         <apexClass>ApologistConversationContext</apexClass>
         <enabled>true</enabled>
     </classAccesses>
-    <servicePresenceStatusAccesses>
-        <enabled>true</enabled>
-        <servicePresenceStatus>Available_Messaging</servicePresenceStatus>
-    </servicePresenceStatusAccesses>
 </PermissionSet>

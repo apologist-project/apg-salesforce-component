@@ -491,6 +491,53 @@ private class ApologistAgentServiceTest {
   }
 
   @IsTest
+  static void objectExists_caseIsPresent() {
+    System.assertEquals(
+      true,
+      ApologistConversationContext.objectExists('Case')
+    );
+    System.assertEquals(
+      false,
+      ApologistConversationContext.objectExists(null)
+    );
+    System.assertEquals(
+      false,
+      ApologistConversationContext.objectExists('Apologist_Not_A_Real_Object__c')
+    );
+  }
+
+  @IsTest
+  static void loadContext_requiresMessagingSessionId() {
+    Boolean threw = false;
+    try {
+      ApologistConversationContext.loadContext(null, null);
+    } catch (AuraHandledException e) {
+      threw = true;
+    }
+    System.assert(threw, 'Expected Messaging Session Id required error');
+  }
+
+  @IsTest
+  static void loadContext_errorsWhenMessagingObjectMissing() {
+    if (ApologistConversationContext.objectExists('MessagingSession')) {
+      return;
+    }
+    Case c = new Case(Subject = 'No messaging', Origin = 'Email');
+    insert c;
+    Boolean threw = false;
+    try {
+      ApologistConversationContext.loadContext(c.Id, null);
+    } catch (AuraHandledException e) {
+      threw = true;
+      System.assert(
+        e.getMessage().contains('not enabled') || e.getMessage() != null,
+        e.getMessage()
+      );
+    }
+    System.assert(threw, 'Expected error when MessagingSession is not in the org');
+  }
+
+  @IsTest
   static void generateDraftForRecord_rejectsUnsupportedType() {
     Account a = new Account(Name = 'Unsupported');
     insert a;

@@ -141,42 +141,71 @@ public with sharing class ApologistConversationContext {
   }
 
   /**
+   * True when the org has the given standard/custom object (e.g. MessagingSession).
+   * Uses describe so Case-only orgs compile without those types.
+   */
+  @TestVisible
+  static Boolean objectExists(String apiName) {
+    if (String.isBlank(apiName)) {
+      return false;
+    }
+    try {
+      Schema.describeSObjects(new List<String>{ apiName });
+      return true;
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
+  /**
    * Loads Messaging Session identifiers and conversation transcript.
    * Prefers Connect REST (Enhanced Messaging); falls back to SOQL for legacy channels.
+   * MessagingSession / ConversationEntry are queried dynamically so this class
+   * compiles in orgs that only use Case email (no Digital Engagement).
    */
   public static DraftContext loadContext(Id messagingSessionId, Integer messageLimit) {
     if (messagingSessionId == null) {
       throw auraError('Messaging Session Id is required.');
     }
+    if (!objectExists('MessagingSession')) {
+      throw auraError(
+        'Messaging Session is not enabled in this org. Install with --for case for Case email only, or enable Digital Engagement / Messaging.'
+      );
+    }
 
-    MessagingSession session = [
-      SELECT
-        Id,
-        Status,
-        ConversationId,
-        MessagingEndUserId,
-        Conversation.ConversationIdentifier
-      FROM MessagingSession
-      WHERE Id = :messagingSessionId
-      WITH USER_MODE
-      LIMIT 1
-    ];
+    List<SObject> sessions = Database.query(
+      'SELECT Id, Status, ConversationId, MessagingEndUserId, Conversation.ConversationIdentifier ' +
+        'FROM MessagingSession WHERE Id = :messagingSessionId LIMIT 1',
+      AccessLevel.USER_MODE
+    );
+    if (sessions.isEmpty()) {
+      throw auraError('Messaging Session was not found.');
+    }
+    SObject session = sessions[0];
 
     DraftContext context = new DraftContext();
     context.contextType = 'messaging';
     context.sessionId = String.valueOf(session.Id);
-    context.sessionStatus = session.Status;
-    context.userId = session.MessagingEndUserId != null
-      ? String.valueOf(session.MessagingEndUserId)
+    context.sessionStatus = (String) session.get('Status');
+    Object endUserId = session.get('MessagingEndUserId');
+    context.userId = endUserId != null
+      ? String.valueOf(endUserId)
       : UserInfo.getUserId();
-    if (session.ConversationId != null) {
+
+    Object conversationIdObj = session.get('ConversationId');
+    SObject conversation = session.getSObject('Conversation');
+    String conversationIdentifier = conversation == null
+      ? null
+      : (String) conversation.get('ConversationIdentifier');
+
+    if (conversationIdObj != null) {
       // Prefer stable conversation identifier when present; fall back to Salesforce Id.
-      context.conversationId = String.isNotBlank(session.Conversation.ConversationIdentifier)
-        ? session.Conversation.ConversationIdentifier
-        : String.valueOf(session.ConversationId);
+      context.conversationId = String.isNotBlank(conversationIdentifier)
+        ? conversationIdentifier
+        : String.valueOf(conversationIdObj);
     }
 
-    if (session.ConversationId == null) {
+    if (conversationIdObj == null) {
       throw auraError(
         'This Messaging Session has no Conversation Id, so no transcript is available.'
       );
@@ -185,15 +214,13 @@ public with sharing class ApologistConversationContext {
     List<Message> chronological = new List<Message>();
 
     // Enhanced Messaging: message bodies are off-core; Connect returns messageText.
-    if (String.isNotBlank(session.Conversation.ConversationIdentifier)) {
-      chronological = loadMessagesFromConnect(
-        session.Conversation.ConversationIdentifier
-      );
+    if (String.isNotBlank(conversationIdentifier)) {
+      chronological = loadMessagesFromConnect(conversationIdentifier);
     }
 
     // Legacy / standard channels may still populate ConversationEntry.Message.
     if (chronological.isEmpty()) {
-      chronological = loadMessagesFromSoql(session.ConversationId);
+      chronological = loadMessagesFromSoql((Id) conversationIdObj);
     }
 
     context.messages = applyMessageLimit(chronological, messageLimit);
@@ -453,20 +480,28 @@ public with sharing class ApologistConversationContext {
 
   static List<Message> loadMessagesFromSoql(Id conversationId) {
     List<Message> newestFirst = new List<Message>();
+    if (conversationId == null || !objectExists('ConversationEntry')) {
+      return newestFirst;
+    }
     // ConversationEntry.Message is not filterable in SOQL — filter blanks in Apex.
-    List<ConversationEntry> entries = [
-      SELECT ActorType, Message, EntryTime
-      FROM ConversationEntry
-      WHERE ConversationId = :conversationId
-      WITH USER_MODE
-      ORDER BY EntryTime DESC
-    ];
+    List<SObject> entries = Database.query(
+      'SELECT ActorType, Message, EntryTime FROM ConversationEntry ' +
+        'WHERE ConversationId = :conversationId ORDER BY EntryTime DESC',
+      AccessLevel.USER_MODE
+    );
 
-    for (ConversationEntry entry : entries) {
-      if (String.isBlank(entry.Message)) {
+    for (SObject entry : entries) {
+      String message = (String) entry.get('Message');
+      if (String.isBlank(message)) {
         continue;
       }
-      newestFirst.add(new Message(entry.ActorType, entry.Message, entry.EntryTime));
+      newestFirst.add(
+        new Message(
+          (String) entry.get('ActorType'),
+          message,
+          (Datetime) entry.get('EntryTime')
+        )
+      );
     }
 
     List<Message> chronological = new List<Message>();
@@ -521,7 +556,9 @@ public with sharing class ApologistConversationContext {
     if (Test.isRunningTest()) {
       return UserInfo.getSessionId();
     }
-    String content = Page.ApologistApiSession.getContent().toString();
+    // PageReference avoids a compile-time Page.ApologistApiSession dependency.
+    PageReference sessionPage = new PageReference('/apex/ApologistApiSession');
+    String content = sessionPage.getContent().toString();
     Integer startIdx = content.indexOf('SESSION_ID_START');
     Integer endIdx = content.indexOf('SESSION_ID_END');
     if (startIdx < 0 || endIdx < 0 || endIdx <= startIdx) {

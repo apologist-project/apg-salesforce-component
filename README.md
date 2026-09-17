@@ -20,10 +20,15 @@ The draft is **never** auto-submitted.
 
 - [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli) (`sf`) authenticated to the target org
 - `curl` and `python3` (used by the install script)
-- A Salesforce org with **Messaging** / Enhanced Messaging (**Messaging Session** records)
-- A Lightning **console** app (e.g. Service Console) with Omni-Channel so agents can accept messaging work
 - An Apologist agent with the **`api`** capability and an API key
 - Agent base URL (origin only), e.g. `https://your-agent.example.com`
+
+**Messaging (chat)** also needs:
+
+- **Digital Engagement / Enhanced Messaging** (**Messaging Session** records)
+- A Lightning **console** app (e.g. Service Console) with Omni-Channel
+
+**Case (email) only** does **not** need Messaging. Use `--for case` (do not deploy the full `force-app` tree). Apex compiles without `MessagingSession` / `ConversationEntry`.
 
 You will need from Apologist:
 
@@ -72,7 +77,7 @@ sf org login web -a apg-sf
   --agent-url https://chat-agent.example.com \
   --api-key "$CHAT_KEY"
 
-# Case (email) Agent only
+# Case (email) Agent only — works in orgs without Digital Engagement / Messaging
 ./scripts/install.sh \
   --org apg-sf \
   --for case \
@@ -112,6 +117,7 @@ Org / deploy:
   --activate-case-page            Set org default Case View (opt-in)
   --case-page <DeveloperName>     Activate that Lightning Case page (implies activate;
                                   default name: Apologist_Case_Page)
+  --full-project                  Deploy entire force-app (requires Messaging; not for --for case)
 
 Context:
   --for messaging|case|both   Scope --agent-url/--api-key (aliases: chat, email, all)
@@ -196,21 +202,38 @@ sf org login web -a apg-sf
 
 ### 2. Deploy metadata
 
-Deploy the component stack:
+Deploy the component stack (Messaging + Case):
 
 ```bash
 sf project deploy start -o apg-sf \
   --source-dir force-app/main/default/lwc/apgGenerateReply \
+  --source-dir force-app/main/default/lwc/apgGenerateCaseReply \
   --source-dir force-app/main/default/lwc/apgGenerateReplyAction \
   --source-dir force-app/main/default/quickActions \
   --source-dir force-app/main/default/classes \
   --source-dir force-app/main/default/namedCredentials \
   --source-dir force-app/main/default/externalCredentials \
   --source-dir force-app/main/default/permissionsets \
-  --source-dir force-app/main/default/remoteSiteSettings
+  --source-dir force-app/main/default/remoteSiteSettings \
+  --source-dir force-app/main/default/pages
 ```
 
-Or the full project:
+**Case email only** (no Digital Engagement / `MessagingSession` in the org) — omit `apgGenerateReply` and do **not** deploy the full `force-app` tree. Include `pages/` because the permission set grants `ApologistApiSession` (or use `scripts/install.sh --for case`, which strips that page access):
+
+```bash
+sf project deploy start -o apg-sf \
+  --source-dir force-app/main/default/lwc/apgGenerateCaseReply \
+  --source-dir force-app/main/default/lwc/apgGenerateReplyAction \
+  --source-dir force-app/main/default/quickActions \
+  --source-dir force-app/main/default/classes \
+  --source-dir force-app/main/default/namedCredentials \
+  --source-dir force-app/main/default/externalCredentials \
+  --source-dir force-app/main/default/permissionsets \
+  --source-dir force-app/main/default/remoteSiteSettings \
+  --source-dir force-app/main/default/pages
+```
+
+Or the full project (requires Messaging / Digital Engagement):
 
 ```bash
 sf project deploy start -o apg-sf
@@ -402,7 +425,8 @@ force-app/main/default/
   lwc/apgGenerateReplyAction/     # Headless Case Quick Action
   quickActions/Case.Apologist_Generate_Draft_Reply*
   classes/ApologistAgentService*  # Named Credential callout + tests
-  classes/ApologistConversationContext*
+  classes/ApologistConversationContext*  # Case EmailMessage + dynamic Messaging SOQL
+  pages/ApologistApiSession*      # VF session bridge for Messaging Connect REST
   namedCredentials/Apologist_Agent*
   externalCredentials/Apologist_Agent*
   permissionsets/Apologist_Agent_Callout*
@@ -424,6 +448,8 @@ sf apex run test --tests ApologistAgentServiceTest --result-format human -o apg-
 
 | Symptom | Likely cause |
 |---------|----------------|
+| `Variable does not exist: MessagingSession` (or `ConversationEntry`) on deploy | Org has no Digital Engagement / Messaging. Use `--for case` (not `--full-project`) so Apex compiles without those types and the Messaging Session LWC is skipped |
+| Permission set: no ApexPage named `ApologistApiSession` | Include `force-app/main/default/pages` in the deploy, or use `scripts/install.sh --for case` (omits that VF page) |
 | Callout / credential errors | Named Credential URL wrong; missing `ApiKey` or `x-api-key` header; permission set not assigned; wrong **Named Credential** property |
 | Wrong Agent answered | Messaging vs Case defaults differ; check App Builder **Named Credential** and which NC URL/key is configured |
 | Install script API key failure | Org auth expired (`sf org login web`); user lacks access to manage Named Credentials |

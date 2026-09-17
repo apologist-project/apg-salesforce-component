@@ -76,12 +76,13 @@ public with sharing class ApologistAgentService {
       throw auraError('Record Id is required.');
     }
 
-    Schema.SObjectType sot = recordId.getSObjectType();
+    // Compare by API name so this class compiles in orgs without Messaging enabled.
+    String typeName = String.valueOf(recordId.getSObjectType());
     ApologistConversationContext.DraftContext context;
 
-    if (sot == MessagingSession.SObjectType) {
+    if (typeName == 'MessagingSession') {
       context = ApologistConversationContext.loadContext(recordId, messageLimit);
-    } else if (sot == Case.SObjectType) {
+    } else if (typeName == 'Case') {
       context = ApologistConversationContext.loadCaseContext(recordId, messageLimit);
     } else {
       throw auraError(
