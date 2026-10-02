@@ -14,11 +14,12 @@ Salesforce DX project: Lightning Web Component + Apex that drafts Service Cloud 
 - `--for case` skips Messaging Session LWC `apgGenerateReply` (targets `MessagingSession`); do not `--full-project` on Case-only orgs
 - Auth (API key per Agent):
   - Default Messaging: Named Credential `Apologist_Agent_Messaging`
-  - Default Case: Named Credential `Apologist_Agent_Case`
+  - Default Case: Named Credential `Apologist_Agent_Case` (the email agent used in the Apologist email editor)
   - Optional per-instance override via App Builder `namedCredential`
   - Legacy `Apologist_Agent` still deployable for overrides / migration
 - Messaging transcript: Connect REST conversation entries (+ VF `ApologistApiSession` for API session)
 - Case transcript: related `EmailMessage` (+ Case subject/description preamble)
+- Case completions use `metadata.client` `email` and a full-email prompt. Messaging stays `channel` and the shorter chat prompt.
 
 ## Do / don’t
 
@@ -27,7 +28,7 @@ Salesforce DX project: Lightning Web Component + Apex that drafts Service Cloud 
 | `POST /api/v1/chat/completions` with `stream: false` | Embed `/beacon/agent*.js` for this draft flow |
 | Keep Agent URL + API key in Named / External Credentials | Put `x-api-key` in LWC or App Builder string props |
 | Use separate NCs for Messaging vs Case (or `Apologist_Agent_*` override) | Point App Builder at a non-Apologist Named Credential |
-| Messaging: `setAgentInput`; Case: open Send Email with defaults | Auto-send |
+| Messaging: `setAgentInput`. Case card: show the latest incoming email beside an editable draft, then open Send Email. Case Quick Action: open Send Email with the draft | Auto-send |
 | Honor `messageLimit` from App Builder | Hardcode a default limit when unset |
 
 ## Local commands

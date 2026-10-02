@@ -37,6 +37,12 @@ public with sharing class ApologistAgentService {
     /** Suggested Subject when opening Case Send Email. */
     @AuraEnabled
     public String emailSubject;
+    /** Subject of the latest incoming Case email, shown beside the draft. */
+    @AuraEnabled
+    public String sourceSubject;
+    /** Plain-text body of the latest incoming Case email. */
+    @AuraEnabled
+    public String sourceBody;
     /** Named Credential API name used for the callout. */
     @AuraEnabled
     public String namedCredential;
@@ -97,6 +103,8 @@ public with sharing class ApologistAgentService {
     result.sessionStatus = context.sessionStatus;
     result.contextType = context.contextType;
     result.emailSubject = context.emailSubject;
+    result.sourceSubject = context.sourceSubject;
+    result.sourceBody = context.sourceBody;
     result.namedCredential = credentialName;
 
     if (context.contextType == 'case') {
@@ -163,8 +171,9 @@ public with sharing class ApologistAgentService {
 
     Map<String, Object> metadata = new Map<String, Object>{
       'device' => 'salesforce',
-      // metadata.client maxLength is 11 per Agent API schema
-      'client' => 'channel'
+      // metadata.client maxLength is 11 per Agent API schema.
+      // Case uses the email client so drafts follow the email agent; Messaging stays chat.
+      'client' => context.contextType == 'case' ? 'email' : 'channel'
     };
     if (String.isNotBlank(context.sessionId)) {
       metadata.put('session', context.sessionId);

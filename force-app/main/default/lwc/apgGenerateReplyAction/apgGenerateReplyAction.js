@@ -4,6 +4,19 @@ import { encodeDefaultFieldValues } from 'lightning/pageReferenceUtils';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
 import generateDraftForRecord from '@salesforce/apex/ApologistAgentService.generateDraftForRecord';
 
+/** Plain-text drafts keep paragraph breaks in the HTML email body. */
+function draftToHtml(draft) {
+  const trimmed = (draft || '').trim();
+  if (!trimmed || /<[a-z][\s\S]*>/i.test(trimmed)) {
+    return trimmed;
+  }
+  return trimmed
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+}
+
 /**
  * Headless Case Quick Action: generate a draft via the Case Agent Named Credential,
  * then open Send Email with the body pre-filled. Does not send.
@@ -42,7 +55,7 @@ export default class ApgGenerateReplyAction extends NavigationMixin(LightningEle
     }
 
     try {
-      await this.openCaseEmailComposer(draft, result.emailSubject);
+      await this.openCaseEmailComposer(draftToHtml(draft), result.emailSubject);
       this.toast(
         'Draft ready',
         'Review the email, then send manually.',

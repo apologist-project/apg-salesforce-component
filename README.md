@@ -3,7 +3,7 @@
 Salesforce Lightning Web Component that drafts Service Cloud replies using the [Apologist Agent API](https://github.com/apologist-project/apg-agent) for:
 
 - **Messaging Session** (Enhanced Messaging) — fills the conversation reply box via `setAgentInput`
-- **Case** (email) — builds context from the Case `EmailMessage` thread and opens **Send Email** with the draft pre-filled
+- **Case** (email) — builds context from the Case `EmailMessage` thread, shows the constituent’s latest email beside an editable draft, then opens **Send Email** when the agent chooses
 
 The draft is **never** auto-submitted.
 
@@ -185,7 +185,8 @@ Without those flags, add **Generate Draft Reply** / **Send Email** on your exist
 Notes:
 - LWC actions **cannot** be dragged onto the classic Case layout Quick Action / feed list (Salesforce blocks that).
 - Opt out of page wiring with `--skip-case-page` if you only want credentials.
-- Optional: also add the **Apologist Generate Reply** record-page widget via App Builder for an on-page draft preview.
+- Add **Apologist Generate Reply (Case)** on the Case record page. That card shows the constituent’s latest email beside the draft. **Open in Send Email** fills the composer after review.
+- The **Generate Draft Reply** Quick Action still opens Send Email immediately and does not show that side-by-side review.
 - Ensure **HtmlBody** / **Subject** are not read-only on the Case **Send Email** action layout.
 
 ---
@@ -313,11 +314,13 @@ Same steps as [After the script](#after-the-script).
 
 **Case email**
 
-1. Add **Generate Draft Reply** to the Case page layout / Lightning actions (see Case Quick Action above).
+1. Add **Apologist Generate Reply (Case)** to the Case Lightning page. Point its Named Credential at the same email agent used in the Apologist email editor (`Apologist_Agent_Case` when blank).
 2. Open a Case that has related **EmailMessage** rows (or at least a Description).
 3. Click **Generate Draft Reply**.
-4. Confirm Send Email opens with the body pre-filled (or use the page widget for an on-page draft preview).
-5. Review and send manually — this component does not send.
+4. Confirm the constituent’s latest email appears beside an editable draft. Edit the draft there if needed.
+5. Click **Open in Send Email** and confirm the body is pre-filled. Send manually — this component does not send.
+
+The Case Quick Action **Generate Draft Reply** skips the side-by-side review and opens Send Email immediately.
 
 ---
 
@@ -371,6 +374,7 @@ Applied via SLDS button brand styling hooks (`--slds-c-button-brand-color-backgr
 Each Agent has its own URL + API key, stored in a Salesforce Named Credential (not in the LWC).
 
 - Leave **Named Credential** blank to use the context default (`Apologist_Agent_Messaging` or `Apologist_Agent_Case`).
+- For Case, that credential should be the email agent from the Apologist email editor. A chat agent drafts shorter, chat-style replies.
 - To point one page placement at a different Agent: create a Named Credential + External Credential in Setup, grant principal access on **Apologist Agent Callout**, then set this property to the Named Credential’s API name.
 
 ### Past messages to include
@@ -395,9 +399,11 @@ Larger transcripts use more tokens and may hit agent or platform limits; use **N
    - **Case:** loads related `EmailMessage` rows (plus Case subject/description preamble)
 3. Apex honors `messageLimit`, then calls `POST /api/v1/chat/completions` with `stream: false` via the Named Credential.
 4. The LWC shows the draft under **Generated Draft Reply**.
+   - **Case:** the card also shows the latest incoming email (subject and body) beside that draft. The draft is editable. **Open in Send Email** sends the edited text to the composer.
+   - **Messaging:** the draft is read-only in the card; the reply box is filled immediately when the session is Active.
 5. Composer step (**does not** send):
-   - **Messaging (Active):** Conversation Toolkit [`setAgentInput`](https://developer.salesforce.com/docs/atlas.en-us.api_console.meta/api_console/sforce_api_console_lightning_setagentinput_lwc.htm)
-   - **Case:** navigates to **Case.SendEmail** (fallback `Global.SendEmail`) with `HtmlBody` / `Subject` pre-filled via `encodeDefaultFieldValues`
+   - **Messaging (Active):** Conversation Toolkit [`setAgentInput`](https://developer.salesforce.com/docs/atlas.en-us.api_console.meta/api_console/sforce_api_console_lightning_setagentinput_lwc.htm). Call metadata uses `client: channel`.
+   - **Case:** **Open in Send Email** (or the Case Quick Action) navigates to **Case.SendEmail** (fallback `Global.SendEmail`) with `HtmlBody` / `Subject` pre-filled via `encodeDefaultFieldValues`. Case calls use `client: email` and ask for a full email in the agent’s email style.
 6. The human reviews, edits if needed, and sends manually.
 
 ### Requirements for Messaging reply box fill
@@ -421,7 +427,8 @@ If generation succeeds but the composer cannot be updated/opened, the draft stil
 
 ```text
 force-app/main/default/
-  lwc/apgGenerateReply/           # Record-page UI + App Builder properties
+  lwc/apgGenerateReply/           # Messaging Session record-page UI
+  lwc/apgGenerateCaseReply/       # Case record-page card (original email + draft)
   lwc/apgGenerateReplyAction/     # Headless Case Quick Action
   quickActions/Case.Apologist_Generate_Draft_Reply*
   classes/ApologistAgentService*  # Named Credential callout + tests
@@ -458,6 +465,8 @@ sf apex run test --tests ApologistAgentServiceTest --result-format human -o apg-
 | `INVALID_SESSION_ID` on Connect | Lightning sessions are not API-enabled; the component uses VF page `ApologistApiSession` for a REST-capable token — ensure that page is deployed and the **Apologist Agent Callout** permission set is assigned |
 | Draft in component but not in reply box | Session not **Active**; Enhanced Conversation missing/closed; not in a supported console |
 | Case draft OK but email fields empty | HtmlBody/Subject read-only on Send Email action layout; or Case.SendEmail missing — try adding the Email action |
+| Case draft much shorter than the email editor | Case Named Credential points at a chat agent. Use the email agent (`Apologist_Agent_Case` or an `Apologist_Agent_*` override) |
+| Original email missing beside the draft | The Case Quick Action opens Send Email immediately. Use the **Apologist Generate Reply (Case)** record-page card, which keeps the latest incoming email on screen until **Open in Send Email** |
 | Quick Action missing on Case | Add **Generate Draft Reply** to the Case page layout (Salesforce Mobile and Lightning Experience Actions) |
 | Case “no context” error | No related EmailMessage rows and empty Case Description |
 | Component missing from Case App Builder | Redeploy LWC meta (Case must be listed in targets); hard-refresh App Builder |

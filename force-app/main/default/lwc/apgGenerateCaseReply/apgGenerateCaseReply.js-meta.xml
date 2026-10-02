@@ -3,7 +3,7 @@
     <apiVersion>62.0</apiVersion>
     <isExposed>true</isExposed>
     <masterLabel>Apologist Generate Reply (Case)</masterLabel>
-    <description>Generates a draft Case email reply via the Apologist Agent API and opens Send Email for review. Does not use Messaging conversation APIs.</description>
+    <description>Generates a draft Case email reply via the Apologist Agent API. Shows the constituent's email beside the draft, then opens Send Email when the agent chooses. Does not use Messaging conversation APIs.</description>
     <targets>
         <target>lightning__RecordPage</target>
     </targets>
@@ -24,7 +24,7 @@
                 type="String"
                 label="Description"
                 description="Short description under the title."
-                default="Generate a draft reply from the Apologist Agent API."
+                default="Generate a draft email, review it next to the constituent’s message, then open Send Email."
             />
             <property
                 name="cardIcon"

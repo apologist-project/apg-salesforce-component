@@ -3,8 +3,22 @@ import { NavigationMixin } from 'lightning/navigation';
 import { encodeDefaultFieldValues } from 'lightning/pageReferenceUtils';
 import generateDraftForRecord from '@salesforce/apex/ApologistAgentService.generateDraftForRecord';
 
+/** Plain-text drafts keep paragraph breaks in the HTML email body. */
+function draftToHtml(draft) {
+  const trimmed = (draft || '').trim();
+  if (!trimmed || /<[a-z][\s\S]*>/i.test(trimmed)) {
+    return trimmed;
+  }
+  return trimmed
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+}
+
 const DEFAULT_TITLE = 'Apologist Generate Reply';
-const DEFAULT_DESCRIPTION = 'Generate a draft reply from the Apologist Agent API.';
+const DEFAULT_DESCRIPTION =
+  'Generate a draft email, review it next to the constituent’s message, then open Send Email.';
 const DEFAULT_ICON = 'standard:sparkles';
 const DEFAULT_BUTTON_COLOR = '#7137ff';
 const DEFAULT_ICON_BACKGROUND_COLOR = '#7137ff';
@@ -25,6 +39,9 @@ export default class ApgGenerateCaseReply extends NavigationMixin(LightningEleme
 
   isBusy = false;
   draftText = '';
+  emailSubject = '';
+  sourceSubject = '';
+  sourceBody = '';
   errorMessage = '';
 
   get resolvedCardTitle() {
@@ -84,9 +101,6 @@ export default class ApgGenerateCaseReply extends NavigationMixin(LightningEleme
   }
 
   async handleGenerate() {
-    this.errorMessage = '';
-    this.draftText = '';
-
     if (!this.recordId) {
       this.fail('No record Id on this page.');
       return;
@@ -95,6 +109,11 @@ export default class ApgGenerateCaseReply extends NavigationMixin(LightningEleme
       return;
     }
 
+    this.errorMessage = '';
+    this.draftText = '';
+    this.emailSubject = '';
+    this.sourceSubject = '';
+    this.sourceBody = '';
     this.isBusy = true;
     let result;
     try {
@@ -117,17 +136,33 @@ export default class ApgGenerateCaseReply extends NavigationMixin(LightningEleme
     }
 
     this.draftText = draft;
+    this.emailSubject = result.emailSubject || '';
+    this.sourceSubject = result.sourceSubject || '';
+    this.sourceBody = result.sourceBody || '';
+    this.isBusy = false;
+  }
+
+  async handleOpenComposer() {
+    const field = this.template.querySelector('[data-id="draft"]');
+    const draft = (field && field.value ? field.value : this.draftText || '').trim();
+    if (this.isBusy) {
+      return;
+    }
+    if (!draft) {
+      this.errorMessage = 'Write a draft before opening Send Email.';
+      return;
+    }
+    this.draftText = draft;
+    this.errorMessage = '';
 
     try {
-      await this.openCaseEmailComposer(draft, result.emailSubject);
+      await this.openCaseEmailComposer(draftToHtml(draft), this.emailSubject);
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('apgGenerateCaseReply composer step', error);
       this.errorMessage =
         'Draft ready below, but Send Email could not be opened: ' +
         this.reduceError(error);
-    } finally {
-      this.isBusy = false;
     }
   }
 

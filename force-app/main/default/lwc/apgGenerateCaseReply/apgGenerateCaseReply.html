@@ -34,13 +34,34 @@
       </template>
 
       <template lwc:if={draftText}>
-        <div class="slds-m-top_small">
-          <lightning-textarea
-            label="Generated Draft Reply"
-            value={draftText}
-            readonly
-            data-id="draft"
-          ></lightning-textarea>
+        <div class="review slds-m-top_small">
+          <template lwc:if={sourceBody}>
+            <div class="slds-form-element">
+              <span class="slds-form-element__label">Constituent's email</span>
+              <div class="slds-form-element__control">
+                <template lwc:if={sourceSubject}>
+                  <div class="slds-text-body_small slds-m-bottom_xx-small">{sourceSubject}</div>
+                </template>
+                <div class="source__body slds-box slds-box_x-small slds-theme_shade">{sourceBody}</div>
+              </div>
+            </div>
+          </template>
+          <div>
+            <lightning-textarea
+              class="draft-input"
+              label="Generated Draft Reply"
+              value={draftText}
+              data-id="draft"
+            ></lightning-textarea>
+            <lightning-button
+              class="slds-m-top_x-small"
+              variant="neutral"
+              label="Open in Send Email"
+              title="Open Send Email with this draft"
+              disabled={isBusy}
+              onclick={handleOpenComposer}
+            ></lightning-button>
+          </div>
         </div>
       </template>
     </div>

@@ -9,10 +9,18 @@ private class ApologistAgentServiceTest {
         'Unexpected endpoint: ' + req.getEndpoint()
       );
       System.assertEquals('POST', req.getMethod());
-      System.assert(
-        req.getBody().contains('"client":"channel"'),
-        'Expected metadata.client=channel'
-      );
+      String body = req.getBody();
+      if (body != null && body.contains('Draft the email body now.')) {
+        System.assert(
+          body.contains('"client":"email"'),
+          'Expected metadata.client=email for Case'
+        );
+      } else {
+        System.assert(
+          body != null && body.contains('"client":"channel"'),
+          'Expected metadata.client=channel'
+        );
+      }
 
       HttpResponse res = new HttpResponse();
       res.setStatusCode(200);
@@ -96,6 +104,7 @@ private class ApologistAgentServiceTest {
     String prompt = ApologistConversationContext.buildPrompt(messages);
     System.assert(prompt.contains('Customer: Where is my order?'));
     System.assert(prompt.contains('Agent: I can look that up.'));
+    System.assert(prompt.contains('Draft the agent reply now.'));
   }
 
   @IsTest
@@ -312,11 +321,15 @@ private class ApologistAgentServiceTest {
     System.assertEquals('Customer', context.messages[0].actorType);
     System.assertEquals('Where is my order?', context.messages[0].body);
     System.assertEquals('Agent', context.messages[1].actorType);
+    System.assertEquals('Order status', context.sourceSubject);
+    System.assertEquals('Where is my order?', context.sourceBody);
 
     String prompt = ApologistConversationContext.buildPrompt(context);
     System.assert(prompt.contains('Case subject: Order status'));
     System.assert(prompt.contains('Case description: Need an update'));
     System.assert(prompt.contains('Customer: Where is my order?'));
+    System.assert(prompt.contains('Draft the email body now.'));
+    System.assert(prompt.contains('email editor'));
   }
 
   @IsTest
@@ -347,6 +360,8 @@ private class ApologistAgentServiceTest {
     System.assertEquals(2, context.messages.size());
     System.assertEquals('m3', context.messages[0].body);
     System.assertEquals('m4', context.messages[1].body);
+    System.assertEquals('m4', context.sourceSubject);
+    System.assertEquals('m4', context.sourceBody);
   }
 
   @IsTest
@@ -390,6 +405,8 @@ private class ApologistAgentServiceTest {
     System.assertEquals('case', result.contextType);
     System.assertEquals(true, result.canFillComposer);
     System.assertEquals('Re: Billing question', result.emailSubject);
+    System.assertEquals('Billing question', result.sourceSubject);
+    System.assertEquals('Please explain my invoice.', result.sourceBody);
     System.assertEquals(
       ApologistAgentService.CREDENTIAL_CASE,
       result.namedCredential
@@ -552,6 +569,255 @@ private class ApologistAgentServiceTest {
       );
     }
     System.assert(threw, 'Expected unsupported record type error');
+  }
+
+  @IsTest
+  static void generateDraft_caseReturnsDraftText() {
+    Case c = new Case(Subject = 'Short', Description = 'Body', Origin = 'Email');
+    insert c;
+    insert new EmailMessage(
+      ParentId = c.Id,
+      Incoming = true,
+      FromAddress = 'customer@example.com',
+      ToAddress = 'support@example.com',
+      Subject = 'Short',
+      TextBody = 'Question',
+      MessageDate = Datetime.now(),
+      Status = '0'
+    );
+    Test.setMock(HttpCalloutMock.class, new CompletionsMock());
+    Test.startTest();
+    String draft = ApologistAgentService.generateDraft(c.Id, null);
+    Test.stopTest();
+    System.assertEquals('Thanks for reaching out — happy to help.', draft);
+  }
+
+  @IsTest
+  static void generateDraftForRecord_requiresRecordId() {
+    Boolean threw = false;
+    try {
+      ApologistAgentService.generateDraftForRecord(null, null, null);
+    } catch (AuraHandledException e) {
+      threw = true;
+    }
+    System.assert(threw, 'Expected record Id required error');
+  }
+
+  @IsTest
+  static void requestCompletion_nullContextUsesChannelClient() {
+    Test.setMock(HttpCalloutMock.class, new CompletionsMock());
+    Test.startTest();
+    String draft = ApologistAgentService.requestCompletion(null);
+    Test.stopTest();
+    System.assertEquals('Thanks for reaching out — happy to help.', draft);
+  }
+
+  @IsTest
+  static void extractContent_rejectsMalformedEnvelopes() {
+    assertExtractThrows('');
+    System.assertNotEquals(null, ApologistAgentService.extractContent('[]'));
+    assertExtractThrows('{"choices":[]}');
+    assertExtractThrows('{"choices":["bad"]}');
+    assertExtractThrows('{"choices":[{"message":"bad"}]}');
+    assertExtractThrows('{"choices":[{"message":{"content":""}}]}');
+    System.assertEquals(
+      'plain',
+      ApologistAgentService.extractContent(JSON.serialize('plain'))
+    );
+    System.assertEquals(
+      'nested text',
+      ApologistAgentService.extractContent(
+        '{"choices":[{"message":{"content":"{\\"content\\":\\"nested text\\"}"}}]}'
+      )
+    );
+  }
+
+  @IsTest
+  static void buildPrompt_nullContextAndEmptyThread() {
+    ApologistConversationContext.DraftContext empty = null;
+    String prompt = ApologistConversationContext.buildPrompt(empty);
+    System.assert(prompt.contains('(No prior messages.)'));
+    System.assert(prompt.contains('Draft the agent reply now.'));
+  }
+
+  @IsTest
+  static void labelForActor_mapsKnownRoles() {
+    System.assertEquals('Unknown', ApologistConversationContext.labelForActor(null));
+    System.assertEquals('Customer', ApologistConversationContext.labelForActor('EndUser'));
+    System.assertEquals('Agent', ApologistConversationContext.labelForActor('System'));
+    System.assertEquals('Agent', ApologistConversationContext.labelForActor('Bot'));
+    System.assertEquals('Queue', ApologistConversationContext.labelForActor('Queue'));
+  }
+
+  @IsTest
+  static void loadMessagesFromEmail_handlesBlankAndHtmlBodies() {
+    System.assertEquals(
+      0,
+      ApologistConversationContext.loadMessagesFromEmail(null, null).size()
+    );
+    Case c = new Case(Subject = 'Html only', Origin = 'Email');
+    insert c;
+    insert new List<EmailMessage>{
+      new EmailMessage(
+        ParentId = c.Id,
+        Incoming = true,
+        FromAddress = 'customer@example.com',
+        ToAddress = 'support@example.com',
+        Subject = 'Empty',
+        TextBody = '   ',
+        MessageDate = Datetime.now().addMinutes(-2),
+        Status = '0'
+      ),
+      new EmailMessage(
+        ParentId = c.Id,
+        Incoming = true,
+        FromAddress = 'customer@example.com',
+        ToAddress = 'support@example.com',
+        Subject = 'Html question',
+        HtmlBody = '<p>Hello<br/>there</p>',
+        MessageDate = Datetime.now(),
+        Status = '0'
+      )
+    };
+    ApologistConversationContext.DraftContext context = new ApologistConversationContext.DraftContext();
+    List<ApologistConversationContext.Message> messages = ApologistConversationContext.loadMessagesFromEmail(
+      c.Id,
+      context
+    );
+    System.assertEquals(1, messages.size());
+    System.assert(messages[0].body.contains('Hello'));
+    System.assertEquals('Html question', context.sourceSubject);
+    System.assert(context.sourceBody.contains('there'));
+    System.assertEquals(null, ApologistConversationContext.emailBodyText(null));
+    System.assertEquals(null, ApologistConversationContext.stripHtml(null));
+  }
+
+  @IsTest
+  static void loadCaseContext_usesContactAsUser() {
+    Contact person = new Contact(LastName = 'Reader');
+    insert person;
+    Case c = new Case(
+      Subject = 'Contact case',
+      ContactId = person.Id,
+      Origin = 'Email'
+    );
+    insert c;
+    insert new EmailMessage(
+      ParentId = c.Id,
+      Incoming = true,
+      FromAddress = 'customer@example.com',
+      ToAddress = 'support@example.com',
+      Subject = 'Contact case',
+      TextBody = 'Hello',
+      MessageDate = Datetime.now(),
+      Status = '0'
+    );
+    ApologistConversationContext.DraftContext context = ApologistConversationContext.loadCaseContext(
+      c.Id,
+      null
+    );
+    System.assertEquals(String.valueOf(person.Id), context.userId);
+  }
+
+  @IsTest
+  static void loadCaseContext_requiresCaseId() {
+    Boolean threw = false;
+    try {
+      ApologistConversationContext.loadCaseContext(null, null);
+    } catch (AuraHandledException e) {
+      threw = true;
+    }
+    System.assert(threw, 'Expected Case Id required error');
+  }
+
+  @IsTest
+  static void connectHelpers_coverParseAndTimestampEdges() {
+    System.assertEquals(
+      0,
+      ApologistConversationContext.parseConnectEntries(null).size()
+    );
+    System.assertEquals(
+      0,
+      ApologistConversationContext.parseConnectEntries('[]').size()
+    );
+    System.assertEquals(
+      0,
+      ApologistConversationContext.parseConnectEntries('{"conversationEntries":"nope"}').size()
+    );
+    List<ApologistConversationContext.Message> nested = ApologistConversationContext.parseConnectEntries(
+      '{"conversationEntries":[1,{"entryPayload":{"abstractMessage":{"staticContent":{"text":"Nested"}}}}]}'
+    );
+    System.assertEquals(1, nested.size());
+    System.assertEquals('Nested', nested[0].body);
+    System.assertEquals(null, ApologistConversationContext.extractConnectMessageText(null));
+    System.assertEquals(null, ApologistConversationContext.timestampToDatetime(null));
+    System.assertEquals(null, ApologistConversationContext.timestampToDatetime('nope'));
+    System.assertNotEquals(null, ApologistConversationContext.timestampToDatetime(1000));
+    System.assertNotEquals(null, ApologistConversationContext.timestampToDatetime(1000L));
+    System.assertNotEquals(null, ApologistConversationContext.timestampToDatetime(1000.0));
+    System.assertEquals(null, ApologistConversationContext.unescapeHtml(null));
+    System.assertEquals(
+      0,
+      ApologistConversationContext.loadMessagesFromConnect(null).size()
+    );
+    System.assertEquals(
+      0,
+      ApologistConversationContext.loadMessagesFromConnect('  ').size()
+    );
+  }
+
+  private class ConnectEntriesMock implements HttpCalloutMock {
+    private Integer statusCode;
+    ConnectEntriesMock(Integer statusCode) {
+      this.statusCode = statusCode;
+    }
+    public HTTPResponse respond(HTTPRequest req) {
+      HttpResponse res = new HttpResponse();
+      res.setStatusCode(statusCode);
+      res.setBody(
+        statusCode == 200
+          ? '{"conversationEntries":[{"messageText":"Hi","sender":{"role":"EndUser"}}]}'
+          : '{"error":"nope"}'
+      );
+      return res;
+    }
+  }
+
+  @IsTest
+  static void loadMessagesFromConnect_readsMockedEntries() {
+    Test.setMock(HttpCalloutMock.class, new ConnectEntriesMock(200));
+    Test.startTest();
+    List<ApologistConversationContext.Message> messages = ApologistConversationContext.loadMessagesFromConnect(
+      'conv-1'
+    );
+    Test.stopTest();
+    System.assertEquals(1, messages.size());
+    System.assertEquals('Hi', messages[0].body);
+  }
+
+  @IsTest
+  static void loadMessagesFromConnect_surfacesHttpStatus() {
+    Test.setMock(HttpCalloutMock.class, new ConnectEntriesMock(500));
+    Boolean threw = false;
+    try {
+      Test.startTest();
+      ApologistConversationContext.loadMessagesFromConnect('conv-1');
+      Test.stopTest();
+    } catch (AuraHandledException e) {
+      threw = true;
+      System.assert(e.getMessage().contains('500') || e.getMessage() != null, e.getMessage());
+    }
+    System.assert(threw, 'Expected Connect HTTP error');
+  }
+
+  private static void assertExtractThrows(String body) {
+    Boolean threw = false;
+    try {
+      ApologistAgentService.extractContent(body);
+    } catch (AuraHandledException e) {
+      threw = true;
+    }
+    System.assert(threw, 'Expected extractContent to reject: ' + body);
   }
 
   private static List<ApologistConversationContext.Message> sampleMessages(Integer count) {

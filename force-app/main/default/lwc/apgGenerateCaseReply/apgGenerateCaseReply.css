@@ -1,3 +1,21 @@
 :host {
   display: block;
 }
+
+.review {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.source__body {
+  white-space: pre-wrap;
+  max-height: 20rem;
+  overflow: auto;
+}
+
+.draft-input {
+  --slds-c-textarea-sizing-min-height: 12rem;
+  --sds-c-textarea-sizing-min-height: 12rem;
+}

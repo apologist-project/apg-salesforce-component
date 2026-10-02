@@ -43,6 +43,10 @@ public with sharing class ApologistConversationContext {
     public List<String> headerLines;
     /** Suggested email Subject for Case Send Email (e.g. Re: …). */
     public String emailSubject;
+    /** Subject of the latest incoming EmailMessage, for the Case review card. */
+    public String sourceSubject;
+    /** Plain-text body of the latest incoming EmailMessage. */
+    public String sourceBody;
   }
 
   /**
@@ -78,12 +82,31 @@ public with sharing class ApologistConversationContext {
     List<Message> chronologicalMessages,
     List<String> headerLines
   ) {
-    List<String> lines = new List<String>{
-      'You are drafting a reply for a human service agent in Salesforce Service Cloud.',
-      'Write a helpful, professional customer-facing reply based on the conversation below.',
-      'Return only the reply text — no preamble, labels, or markdown fences.',
-      ''
-    };
+    return buildPrompt(chronologicalMessages, headerLines, null);
+  }
+
+  /**
+   * contextType "case" asks for a full email in the agent's email style.
+   * Messaging and other contexts keep the shorter chat-style draft instruction.
+   */
+  static String buildPrompt(
+    List<Message> chronologicalMessages,
+    List<String> headerLines,
+    String contextType
+  ) {
+    List<String> lines = contextType == 'case'
+      ? new List<String>{
+          'You are drafting an email reply for a human service agent.',
+          'Follow your email-writing instructions. Write a complete email with the same depth and coverage you would use in the email editor.',
+          'Return only the email body — no subject line, preamble, labels, or markdown fences.',
+          ''
+        }
+      : new List<String>{
+          'You are drafting a reply for a human service agent in Salesforce Service Cloud.',
+          'Write a helpful, professional customer-facing reply based on the conversation below.',
+          'Return only the reply text — no preamble, labels, or markdown fences.',
+          ''
+        };
 
     if (headerLines != null) {
       for (String headerLine : headerLines) {
@@ -109,7 +132,9 @@ public with sharing class ApologistConversationContext {
     }
 
     lines.add('');
-    lines.add('Draft the agent reply now.');
+    lines.add(
+      contextType == 'case' ? 'Draft the email body now.' : 'Draft the agent reply now.'
+    );
     return String.join(lines, '\n');
   }
 
@@ -118,7 +143,7 @@ public with sharing class ApologistConversationContext {
     if (context == null) {
       return buildPrompt(new List<Message>(), null);
     }
-    return buildPrompt(context.messages, context.headerLines);
+    return buildPrompt(context.messages, context.headerLines, context.contextType);
   }
 
   @TestVisible
@@ -270,7 +295,7 @@ public with sharing class ApologistConversationContext {
     }
     context.headerLines = headers;
 
-    List<Message> chronological = loadMessagesFromEmail(c.Id);
+    List<Message> chronological = loadMessagesFromEmail(c.Id, context);
     context.messages = applyMessageLimit(chronological, messageLimit);
 
     if (context.messages.isEmpty() && headers.isEmpty()) {
@@ -285,9 +310,11 @@ public with sharing class ApologistConversationContext {
   /**
    * EmailMessage rows for a Case, chronological (oldest first).
    * Incoming → Customer; otherwise Agent. Prefers TextBody; falls back to stripped HtmlBody.
+   * Records the latest incoming message on context for the Case review card.
+   * That source is the full thread, independent of messageLimit.
    */
   @TestVisible
-  static List<Message> loadMessagesFromEmail(Id caseId) {
+  static List<Message> loadMessagesFromEmail(Id caseId, DraftContext context) {
     List<Message> chronological = new List<Message>();
     if (caseId == null) {
       return chronological;
@@ -306,8 +333,13 @@ public with sharing class ApologistConversationContext {
       if (String.isBlank(body)) {
         continue;
       }
+      String trimmed = body.trim();
       String actorType = email.Incoming == true ? 'Customer' : 'Agent';
-      chronological.add(new Message(actorType, body.trim(), email.MessageDate));
+      chronological.add(new Message(actorType, trimmed, email.MessageDate));
+      if (context != null && email.Incoming == true) {
+        context.sourceSubject = email.Subject;
+        context.sourceBody = trimmed;
+      }
     }
     return chronological;
   }
